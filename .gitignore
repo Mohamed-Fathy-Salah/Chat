@@ -1,0 +1,18 @@
+# Ruby
+/vendor/
+/.bundle/
+*.gem
+*.rbc
+log/*
+tmp/*
+coverage/
+.DS_Store
+
+# Go
+/bin/
+/build/
+/dist/
+*.exe
+*.test
+*.out
+/go.sum
