@@ -11,19 +11,10 @@ module Api
         # Get next chat number using Redis
         chat_number = get_next_chat_number(@application.token)
 
-        chat = @application.chats.new(
-          number: chat_number,
-          creator: current_user
-        )
-
-        if chat.save
-          # Publish to RabbitMQ for async processing
-          publish_chat_creation(chat)
-          
-          render json: { chatNumber: chat.number }, status: :ok
-        else
-          render json: { errors: chat.errors.full_messages }, status: :unprocessable_entity
-        end
+        # Publish to RabbitMQ for async processing
+        publish_chat_creation(@application.token, chat_number, current_user.id)
+        
+        render json: { chatNumber: chat_number }, status: :ok
       end
 
       # GET /api/v1/applications/:token/chats
@@ -49,15 +40,30 @@ module Api
 
       def get_next_chat_number(token)
         # Increment and get the next chat number from Redis
-        REDIS.incr("chat_counter:#{token}")
+        # Format: "1<count>" where 1 = modified flag
+        key = "chat_counter:#{token}"
+        value = REDIS.get(key)
+        
+        if value.nil?
+          # Fetch current count from database
+          app = Application.find_by(token: token)
+          count = app ? app.chats_count + 1 : 1
+        else
+          # Extract count (remove first digit which is the modified flag)
+          count = value[1..-1].to_i + 1
+        end
+        
+        # Store with modified flag set to 1
+        REDIS.set(key, "1#{count}")
+        count
       end
 
-      def publish_chat_creation(chat)
+      def publish_chat_creation(token, chat_number, creator_id)
         # Publish to RabbitMQ for async processing
         message = {
-          token: chat.token,
-          chatNumber: chat.number,
-          creatorId: chat.creator_id
+          token: token,
+          chatNumber: chat_number,
+          creatorId: creator_id
         }
         
         RabbitMqService.publish('create_chats', message.to_json)

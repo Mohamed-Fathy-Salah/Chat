@@ -67,6 +67,24 @@ services:
       CORS_ORIGINS: http://localhost:3001,http://localhost:3000
       RAILS_ENV: development
 
+  writer:
+    build: ./writer
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    environment:
+      DATABASE_HOST: db
+      DATABASE_USERNAME: root
+      DATABASE_PASSWORD: password
+      DATABASE_NAME: auth_api_development
+      REDIS_URL: redis://redis:6379/0
+      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672
+    restart: unless-stopped
+
 volumes:
   mysql_data:
   redis_data:
