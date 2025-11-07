@@ -16,3 +16,5 @@ coverage/
 *.test
 *.out
 /go.sum
+requests/log
+requests/tmp

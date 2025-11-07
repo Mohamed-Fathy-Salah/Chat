@@ -1,0 +1,21 @@
+# Auth API Secret Key Rotation Cron Job
+# This file configures automatic secret key rotation every 2 days
+
+# Rotate secret key every 2 days at midnight
+0 0 */2 * * cd /path/to/auth_api && docker-compose exec -T web bundle exec rake auth:check_and_rotate >> /var/log/auth_api_rotation.log 2>&1
+
+# Alternative: If running without docker-compose, use direct Rails command
+# 0 0 */2 * * cd /path/to/auth_api && RAILS_ENV=production bundle exec rake auth:check_and_rotate >> /var/log/auth_api_rotation.log 2>&1
+
+# Installation Instructions:
+# 1. Edit this file and update /path/to/auth_api with your actual application path
+# 2. Install the cron job:
+#    crontab -e
+# 3. Add the line above to your crontab
+# 4. Save and exit
+#
+# To view cron logs:
+#    tail -f /var/log/auth_api_rotation.log
+#
+# To manually trigger rotation:
+#    docker-compose exec web bundle exec rake auth:rotate_secret_key

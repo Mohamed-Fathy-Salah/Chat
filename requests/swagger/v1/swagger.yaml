@@ -1,0 +1,472 @@
+openapi: 3.0.1
+info:
+  title: Chat API V1
+  version: v1
+  description: |
+    Chat application API with support for applications, chats, and messages.
+    
+    **Authentication:** JWT Bearer token required for most endpoints.
+paths:
+  /api/v1/auth/register:
+    post:
+      summary: Register a new user
+      tags:
+        - Authentication
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - name
+                - email
+                - password
+              properties:
+                name:
+                  type: string
+                email:
+                  type: string
+                  format: email
+                password:
+                  type: string
+                  format: password
+      responses:
+        '200':
+          description: User registered successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  token:
+                    type: string
+                  refresh_token:
+                    type: string
+        '422':
+          description: Validation error
+  
+  /api/v1/auth/login:
+    post:
+      summary: Login user
+      tags:
+        - Authentication
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - email
+                - password
+              properties:
+                email:
+                  type: string
+                  format: email
+                password:
+                  type: string
+                  format: password
+      responses:
+        '200':
+          description: Login successful
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  token:
+                    type: string
+                  refresh_token:
+                    type: string
+        '401':
+          description: Invalid credentials
+  
+  /api/v1/auth/logout:
+    delete:
+      summary: Logout user
+      tags:
+        - Authentication
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Logout successful
+        '401':
+          description: Unauthorized
+  
+  /api/v1/auth/me:
+    get:
+      summary: Get current user
+      tags:
+        - Authentication
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: User details
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id:
+                    type: integer
+                  name:
+                    type: string
+                  email:
+                    type: string
+        '401':
+          description: Unauthorized
+  
+  /api/v1/auth/refresh:
+    post:
+      summary: Refresh access token
+      tags:
+        - Authentication
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - refresh_token
+              properties:
+                refresh_token:
+                  type: string
+      responses:
+        '200':
+          description: Token refreshed
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  token:
+                    type: string
+        '401':
+          description: Invalid refresh token
+  
+  /api/v1/applications:
+    post:
+      summary: Create a new application
+      tags:
+        - Applications
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - name
+              properties:
+                name:
+                  type: string
+      responses:
+        '200':
+          description: Application created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  token:
+                    type: string
+        '401':
+          description: Unauthorized
+    
+    put:
+      summary: Update an application
+      tags:
+        - Applications
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - token
+                - name
+              properties:
+                token:
+                  type: string
+                name:
+                  type: string
+      responses:
+        '200':
+          description: Application updated
+        '403':
+          description: Forbidden
+        '404':
+          description: Application not found
+    
+    get:
+      summary: List all applications
+      tags:
+        - Applications
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: List of applications
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    token:
+                      type: string
+                    name:
+                      type: string
+                    chatsCount:
+                      type: integer
+        '401':
+          description: Unauthorized
+  
+  /api/v1/applications/{token}/chats:
+    post:
+      summary: Create a new chat
+      tags:
+        - Chats
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: token
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Chat created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  chatNumber:
+                    type: integer
+        '404':
+          description: Application not found
+    
+    get:
+      summary: List all chats for an application
+      tags:
+        - Chats
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: token
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: List of chats
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    chatNumber:
+                      type: integer
+                    messagesCount:
+                      type: integer
+        '404':
+          description: Application not found
+  
+  /api/v1/applications/{token}/chats/{chatNumber}/messages:
+    post:
+      summary: Create a new message
+      tags:
+        - Messages
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: token
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: chatNumber
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - body
+              properties:
+                body:
+                  type: string
+                createdAt:
+                  type: string
+                  format: date-time
+      responses:
+        '200':
+          description: Message created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  messageNumber:
+                    type: integer
+        '404':
+          description: Chat not found
+    
+    put:
+      summary: Update a message
+      tags:
+        - Messages
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: token
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: chatNumber
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - messageNumber
+                - body
+              properties:
+                messageNumber:
+                  type: integer
+                body:
+                  type: string
+      responses:
+        '200':
+          description: Message updated
+        '403':
+          description: Forbidden
+        '404':
+          description: Message not found
+    
+    get:
+      summary: List messages in a chat
+      tags:
+        - Messages
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: token
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: chatNumber
+          in: path
+          required: true
+          schema:
+            type: integer
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 10
+      responses:
+        '200':
+          description: List of messages
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    messageNumber:
+                      type: integer
+                    senderName:
+                      type: string
+                    body:
+                      type: string
+                    createdAt:
+                      type: string
+                      format: date-time
+        '404':
+          description: Chat not found
+  
+  /api/v1/applications/{token}/chats/{chatNumber}/messages/search:
+    get:
+      summary: Search messages in a chat
+      tags:
+        - Messages
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: token
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: chatNumber
+          in: path
+          required: true
+          schema:
+            type: integer
+        - name: q
+          in: query
+          required: true
+          schema:
+            type: string
+          description: Search query
+      responses:
+        '200':
+          description: Search results
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    messageNumber:
+                      type: integer
+                    body:
+                      type: string
+                    createdAt:
+                      type: string
+                      format: date-time
+        '404':
+          description: Chat not found
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT

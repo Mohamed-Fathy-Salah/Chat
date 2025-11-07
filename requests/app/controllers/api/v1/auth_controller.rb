@@ -1,0 +1,84 @@
+module Api
+  module V1
+    class AuthController < ApplicationController
+      skip_before_action :authenticate_request, only: [:register, :login]
+
+      def register
+        user = User.new(user_params)
+        
+        if user.save
+          token = AuthenticationService.encode_token(user_id: user.id)
+          set_auth_cookie(token)
+          
+          render json: { 
+            message: 'User created successfully',
+            user: user_response(user)
+          }, status: :created
+        else
+          render json: { errors: user.errors.full_messages }, status: :unprocessable_entity
+        end
+      end
+
+      def login
+        user = User.find_by(email: params[:email]&.downcase)
+        
+        if user&.authenticate(params[:password])
+          token = AuthenticationService.encode_token(user_id: user.id)
+          set_auth_cookie(token)
+          
+          render json: { 
+            message: 'Logged in successfully',
+            user: user_response(user)
+          }
+        else
+          render json: { error: 'Invalid email or password' }, status: :unauthorized
+        end
+      end
+
+      def logout
+        cookies.delete(:auth_token)
+        render json: { message: 'Logged out successfully' }
+      end
+
+      def me
+        render json: { user: user_response(current_user) }
+      end
+
+      def refresh
+        # Generate new token with same user_id
+        token = AuthenticationService.encode_token(user_id: current_user.id)
+        set_auth_cookie(token)
+        
+        render json: { 
+          message: 'Token refreshed successfully',
+          user: user_response(current_user)
+        }
+      end
+
+      private
+
+      def user_params
+        params.permit(:email, :password, :password_confirmation, :name)
+      end
+
+      def set_auth_cookie(token)
+        cookies.signed[:auth_token] = {
+          value: token,
+          httponly: true,
+          secure: Rails.env.production?,
+          same_site: :lax,
+          expires: 7.days.from_now
+        }
+      end
+
+      def user_response(user)
+        {
+          id: user.id,
+          email: user.email,
+          name: user.name,
+          created_at: user.created_at
+        }
+      end
+    end
+  end
+end
