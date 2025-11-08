@@ -12,6 +12,7 @@ import (
 	"github.com/chat/writer/internal/database"
 	"github.com/chat/writer/internal/handlers"
 	"github.com/chat/writer/internal/queue"
+	"github.com/chat/writer/internal/services"
 )
 
 func main() {
@@ -42,9 +43,22 @@ func main() {
 	}
 	defer rabbit.Close()
 
+	// Connect to Elasticsearch
+	esClient, err := database.ConnectElasticsearch(cfg.ElasticsearchURL)
+	if err != nil {
+		log.Printf("Warning: Failed to connect to Elasticsearch: %v", err)
+		log.Println("Continuing without Elasticsearch support")
+	}
+
+	// Initialize Elasticsearch service
+	var esService *services.ElasticsearchService
+	if esClient != nil {
+		esService = services.NewElasticsearchService(esClient, ctx)
+	}
+
 	// Initialize handlers
 	chatHandler := handlers.NewChatHandler(db)
-	messageHandler := handlers.NewMessageHandler(db)
+	messageHandler := handlers.NewMessageHandler(db, esService)
 
 	// Initialize consumers
 	chatConsumer := queue.NewChatConsumer(rabbit, chatHandler)

@@ -2,18 +2,24 @@ package handlers
 
 import (
 	"fmt"
+	"log"
 	"time"
 
 	"github.com/chat/writer/internal/database"
 	"github.com/chat/writer/internal/models"
+	"github.com/chat/writer/internal/services"
 )
 
 type MessageHandler struct {
-	db *database.DB
+	db        *database.DB
+	esService *services.ElasticsearchService
 }
 
-func NewMessageHandler(db *database.DB) *MessageHandler {
-	return &MessageHandler{db: db}
+func NewMessageHandler(db *database.DB, esService *services.ElasticsearchService) *MessageHandler {
+	return &MessageHandler{
+		db:        db,
+		esService: esService,
+	}
 }
 
 func (h *MessageHandler) CreateMessage(msg models.CreateMessageMessage) error {
@@ -36,12 +42,42 @@ func (h *MessageHandler) CreateMessage(msg models.CreateMessageMessage) error {
 	}
 
 	// Insert message (no count update)
-	_, err = h.db.Exec(`
+	result, err := h.db.Exec(`
 		INSERT INTO messages (chat_id, token, chat_number, number, body, creator_id, created_at, updated_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 	`, chatID, msg.Token, msg.ChatNumber, msg.MessageNumber, msg.Body, msg.SenderID, createdAt, createdAt)
 
-	return err
+	if err != nil {
+		return err
+	}
+
+	// Get the inserted message ID
+	messageID, err := result.LastInsertId()
+	if err != nil {
+		log.Printf("Warning: Failed to get message ID: %v", err)
+	}
+
+	// Index in Elasticsearch if available
+	if h.esService != nil {
+		doc := services.MessageDocument{
+			ID:         int(messageID),
+			ChatID:     chatID,
+			Token:      msg.Token,
+			ChatNumber: msg.ChatNumber,
+			Number:     msg.MessageNumber,
+			Body:       msg.Body,
+			SenderID:   msg.SenderID,
+			CreatedAt:  createdAt.Format(time.RFC3339),
+		}
+
+		if err := h.esService.IndexMessage(doc); err != nil {
+			log.Printf("Warning: Failed to index message in Elasticsearch: %v", err)
+		} else {
+			log.Printf("Indexed message %d in Elasticsearch", msg.MessageNumber)
+		}
+	}
+
+	return nil
 }
 
 func (h *MessageHandler) UpdateMessage(msg models.UpdateMessageMessage) error {
@@ -61,6 +97,15 @@ func (h *MessageHandler) UpdateMessage(msg models.UpdateMessageMessage) error {
 	rows, _ := result.RowsAffected()
 	if rows == 0 {
 		return fmt.Errorf("message not found")
+	}
+
+	// Update in Elasticsearch if available
+	if h.esService != nil {
+		if err := h.esService.UpdateMessage(msg.Token, msg.ChatNumber, msg.MessageNumber, msg.Body); err != nil {
+			log.Printf("Warning: Failed to update message in Elasticsearch: %v", err)
+		} else {
+			log.Printf("Updated message %d in Elasticsearch", msg.MessageNumber)
+		}
 	}
 
 	return nil

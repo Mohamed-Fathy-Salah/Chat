@@ -10,6 +10,7 @@ gem 'redis', '~> 5.0'
 gem 'bcrypt', '~> 3.1.7'
 gem 'jwt'
 gem 'bunny', '~> 2.22'
+gem 'elasticsearch', '~> 8.0'
 
 # Reduces boot times through caching; required in config/boot.rb
 gem 'bootsnap', require: false
