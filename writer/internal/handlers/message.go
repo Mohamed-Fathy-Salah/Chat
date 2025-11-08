@@ -25,29 +25,17 @@ func NewMessageHandler(db *database.DB, esService *services.ElasticsearchService
 }
 
 func (h *MessageHandler) CreateMessage(msg models.CreateMessageMessage) error {
-	// Get chat ID
-	var chatID int
-	err := h.db.QueryRow(`
-		SELECT c.id 
-		FROM chats c 
-		JOIN applications a ON c.application_id = a.id 
-		WHERE a.token = ? AND c.number = ?
-	`, msg.Token, msg.ChatNumber).Scan(&chatID)
-	if err != nil {
-		return fmt.Errorf("failed to find chat: %w", err)
-	}
-
 	// Parse date
 	createdAt, err := time.Parse(time.RFC3339, msg.Date)
 	if err != nil {
 		createdAt = time.Now()
 	}
 
-	// Insert message (no count update)
+	// Insert message directly using token and chat_number (no need to lookup chat_id)
 	result, err := h.db.Exec(`
-		INSERT INTO messages (chat_id, token, chat_number, number, body, creator_id, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-	`, chatID, msg.Token, msg.ChatNumber, msg.MessageNumber, msg.Body, msg.SenderID, createdAt, createdAt)
+		INSERT INTO messages (token, chat_number, number, body, creator_id, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?)
+	`, msg.Token, msg.ChatNumber, msg.MessageNumber, msg.Body, msg.SenderID, createdAt, createdAt)
 
 	if err != nil {
 		return err
@@ -61,14 +49,22 @@ func (h *MessageHandler) CreateMessage(msg models.CreateMessageMessage) error {
 
 	// Index in Elasticsearch if available
 	if h.esService != nil {
+		// Get sender name for Elasticsearch
+		var senderName string
+		err := h.db.QueryRow("SELECT name FROM users WHERE id = ?", msg.SenderID).Scan(&senderName)
+		if err != nil {
+			log.Printf("Warning: Failed to get sender name: %v", err)
+			senderName = ""
+		}
+
 		doc := services.MessageDocument{
 			ID:         int(messageID),
-			ChatID:     chatID,
 			Token:      msg.Token,
 			ChatNumber: msg.ChatNumber,
 			Number:     msg.MessageNumber,
 			Body:       msg.Body,
 			SenderID:   msg.SenderID,
+			SenderName: senderName,
 			CreatedAt:  createdAt.Format(time.RFC3339),
 		}
 
@@ -92,13 +88,11 @@ func (h *MessageHandler) CreateMessage(msg models.CreateMessageMessage) error {
 }
 
 func (h *MessageHandler) UpdateMessage(msg models.UpdateMessageMessage) error {
-	// Update message
+	// Update message directly using token, chat_number, and number
 	result, err := h.db.Exec(`
-		UPDATE messages m
-		JOIN chats c ON m.chat_id = c.id
-		JOIN applications a ON c.application_id = a.id
-		SET m.body = ?, m.updated_at = NOW()
-		WHERE a.token = ? AND c.number = ? AND m.number = ?
+		UPDATE messages
+		SET body = ?, updated_at = NOW()
+		WHERE token = ? AND chat_number = ? AND number = ?
 	`, msg.Body, msg.Token, msg.ChatNumber, msg.MessageNumber)
 
 	if err != nil {

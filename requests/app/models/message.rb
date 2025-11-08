@@ -1,18 +1,8 @@
 class Message < ApplicationRecord
-  belongs_to :chat
   belongs_to :creator, class_name: 'User'
 
-  validates :number, presence: true, uniqueness: { scope: :chat_id }
+  validates :number, presence: true, uniqueness: { scope: [:token, :chat_number] }
   validates :body, presence: true
-
-  before_validation :set_token_and_chat_number, on: :create
-
-  private
-
-  def set_token_and_chat_number
-    if chat
-      self.token = chat.token
-      self.chat_number = chat.number
-    end
-  end
+  validates :token, presence: true
+  validates :chat_number, presence: true
 end

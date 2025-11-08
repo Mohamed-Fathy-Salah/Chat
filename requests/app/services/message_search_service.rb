@@ -1,11 +1,11 @@
 class MessageSearchService
-  def self.search(chat, query)
+  def self.search(token, chat_number, query)
     # Try Elasticsearch first if available
     if elasticsearch_available?
-      search_with_elasticsearch(chat, query)
+      search_with_elasticsearch(token, chat_number, query)
     else
       # Fallback to SQL search
-      search_with_sql(chat, query)
+      search_with_sql(token, chat_number, query)
     end
   end
 
@@ -15,7 +15,7 @@ class MessageSearchService
     false
   end
 
-  def self.search_with_elasticsearch(chat, query)
+  def self.search_with_elasticsearch(token, chat_number, query)
     return [] if query.blank?
 
     response = elasticsearch_client.search(
@@ -34,38 +34,42 @@ class MessageSearchService
                 }
               },
               {
-                term: {
-                  chat_id: chat.id
-                }
+                term: { token: token }
+              },
+              {
+                term: { chat_number: chat_number }
               }
             ]
           }
         },
         sort: [
           { created_at: { order: 'desc' } }
-        ]
+        ],
+        _source: ['number', 'body', 'created_at', 'sender_name']
       }
     )
 
-    message_ids = response['hits']['hits'].map { |hit| hit['_source']['id'] }
-    return [] if message_ids.empty?
-
-    messages = chat.messages.where(id: message_ids)
-                    .select(:id, :number, :body, :created_at)
-    
-    # Preserve Elasticsearch order
-    messages_hash = messages.index_by(&:id)
-    message_ids.map { |id| messages_hash[id] }.compact
+    # Get all data directly from Elasticsearch
+    response['hits']['hits'].map do |hit|
+      source = hit['_source']
+      OpenStruct.new(
+        number: source['number'],
+        body: source['body'],
+        created_at: source['created_at'],
+        sender_name: source['sender_name']
+      )
+    end
   rescue StandardError => e
     Rails.logger.error("Elasticsearch search failed: #{e.message}")
-    search_with_sql(chat, query)
+    search_with_sql(token, chat_number, query)
   end
 
-  def self.search_with_sql(chat, query)
-    chat.messages
-        .where('body LIKE ?', "%#{query}%")
-        .select(:number, :body, :created_at)
-        .order(created_at: :desc)
+  def self.search_with_sql(token, chat_number, query)
+    Message.where(token: token, chat_number: chat_number)
+           .where('messages.body LIKE ?', "%#{query}%")
+           .joins(:creator)
+           .select('messages.number, messages.body, messages.created_at, users.name as sender_name')
+           .order(id: :desc)
   end
 
   def self.elasticsearch_client

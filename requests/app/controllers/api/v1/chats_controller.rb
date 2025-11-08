@@ -2,26 +2,31 @@ module Api
   module V1
     class ChatsController < ApplicationController
       before_action :authorize_request
-      before_action :find_application
 
       # POST /api/v1/applications/:token/chats
       def create
-        return render json: { error: 'Application not found' }, status: :not_found unless @application
+        # Just verify token exists
+        unless Application.where(token: params[:token]).exists?
+          return render json: { error: 'Application not found' }, status: :not_found
+        end
 
         # Get next chat number using Redis
-        chat_number = get_next_chat_number(@application.token)
+        chat_number = get_next_chat_number(params[:token])
 
         # Publish to RabbitMQ for async processing
-        publish_chat_creation(@application.token, chat_number, current_user.id)
+        publish_chat_creation(params[:token], chat_number, current_user.id)
         
         render json: { chatNumber: chat_number }, status: :ok
       end
 
       # GET /api/v1/applications/:token/chats
       def index
-        return render json: { error: 'Application not found' }, status: :not_found unless @application
+        # Just verify token exists
+        unless Application.where(token: params[:token]).exists?
+          return render json: { error: 'Application not found' }, status: :not_found
+        end
 
-        chats = @application.chats.select(:number, :messages_count)
+        chats = Chat.where(token: params[:token]).select(:number, :messages_count)
 
         render json: chats.map { |chat|
           {
@@ -33,20 +38,13 @@ module Api
 
       private
 
-      def find_application
-        # Any authenticated user can access any application for viewing/creating chats
-        @application = Application.find_by(token: params[:token])
-      end
-
       def get_next_chat_number(token)
         # Atomically increment and get the next chat number from Redis
         key = "chat_counter:#{token}"
-        count = REDIS.get(key)
         
-        if count.nil?
+        unless REDIS.exists?(key)
           # Fetch current count from database and initialize Redis
-          app = Application.find_by(token: token)
-          count = app ? app.chats_count : 0
+          count = Application.where(token: token).pick(:chats_count) || 0
           REDIS.set(key, count)
         end
         

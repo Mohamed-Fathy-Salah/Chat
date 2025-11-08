@@ -7,10 +7,10 @@ class CountUpdateService
       token = key.split(':').last
       count = REDIS.get(key).to_i
       
-      application = Application.find_by(token: token)
+      application = Application.where(token: token).pick(:id)
       next unless application
       
-      application.update_column(:chats_count, count)
+      Application.where(id: application).update_all(chats_count: count)
       Rails.logger.info "Updated chats_count for application #{token}: #{count}"
     end
   end
@@ -25,13 +25,10 @@ class CountUpdateService
       chat_number = parts[2].to_i
       count = REDIS.get(key).to_i
       
-      application = Application.find_by(token: token)
-      next unless application
-      
-      chat = application.chats.find_by(number: chat_number)
+      chat = Chat.where(token: token, number: chat_number).pick(:id)
       next unless chat
       
-      chat.update_column(:messages_count, count)
+      Chat.where(id: chat).update_all(messages_count: count)
       Rails.logger.info "Updated messages_count for chat #{token}:#{chat_number}: #{count}"
     end
   end

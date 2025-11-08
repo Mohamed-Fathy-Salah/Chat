@@ -2,34 +2,35 @@ module Api
   module V1
     class MessagesController < ApplicationController
       before_action :authorize_request
-      before_action :find_application_and_chat
 
       # POST /api/v1/applications/:token/chats/:chat_number/messages
       def create
-        return render json: { error: 'Chat not found' }, status: :not_found unless @chat
+        # Just verify chat exists
+        unless Chat.where(token: params[:token], number: params[:chat_number]).exists?
+          return render json: { error: 'Chat not found' }, status: :not_found
+        end
 
         # Get next message number using Redis
-        message_number = get_next_message_number(@application.token, @chat.number)
+        message_number = get_next_message_number(params[:token], params[:chat_number])
 
         # Publish to RabbitMQ for async processing
-        publish_message_creation(@application.token, @chat.number, message_number, current_user.id, params[:body])
+        publish_message_creation(params[:token], params[:chat_number], message_number, current_user.id, params[:body])
         
         render json: { messageNumber: message_number }, status: :ok
       end
 
       # PUT /api/v1/applications/:token/chats/:chat_number/messages
       def update
-        return render json: { error: 'Chat not found' }, status: :not_found unless @chat
-
-        message = @chat.messages.find_by(number: params[:messageNumber])
+        message = Message.where(token: params[:token], chat_number: params[:chat_number], number: params[:messageNumber])
+                         .pick(:creator_id)
 
         if message.nil?
           render json: { error: 'Message not found' }, status: :not_found
-        elsif message.creator_id != current_user.id
+        elsif message != current_user.id
           render json: { error: 'You can only edit your own messages' }, status: :forbidden
         else
           # Publish to RabbitMQ for async processing
-          publish_message_update(@application.token, @chat.number, params[:messageNumber], params[:body])
+          publish_message_update(params[:token], params[:chat_number], params[:messageNumber], params[:body])
           
           head :ok
         end
@@ -37,19 +38,21 @@ module Api
 
       # GET /api/v1/applications/:token/chats/:chat_number/messages
       def index
-        return render json: { error: 'Chat not found' }, status: :not_found unless @chat
+        # Just verify chat exists
+        unless Chat.where(token: params[:token], number: params[:chat_number]).exists?
+          return render json: { error: 'Chat not found' }, status: :not_found
+        end
 
         page = params[:page]&.to_i || 1
         limit = params[:limit]&.to_i || 10
         offset = (page - 1) * limit
 
-        messages = @chat.messages
-                        .includes(:creator)
-                        .select('messages.*, users.name as sender_name')
-                        .joins(:creator)
-                        .order(created_at: :desc)
-                        .limit(limit)
-                        .offset(offset)
+        messages = Message.where(token: params[:token], chat_number: params[:chat_number])
+                          .joins(:creator)
+                          .select('messages.number, messages.body, messages.created_at, users.name as sender_name')
+                          .order(id: :desc)
+                          .limit(limit)
+                          .offset(offset)
 
         render json: messages.map { |msg|
           {
@@ -63,14 +66,18 @@ module Api
 
       # GET /api/v1/applications/:token/chats/:chat_number/messages/search
       def search
-        return render json: { error: 'Chat not found' }, status: :not_found unless @chat
+        # Just verify chat exists
+        unless Chat.where(token: params[:token], number: params[:chat_number]).exists?
+          return render json: { error: 'Chat not found' }, status: :not_found
+        end
 
         query = params[:q]
-        messages = MessageSearchService.search(@chat, query)
+        messages = MessageSearchService.search(params[:token], params[:chat_number], query)
 
         render json: messages.map { |msg|
           {
             messageNumber: msg.number,
+            senderName: msg.sender_name,
             body: msg.body,
             createdAt: msg.created_at
           }
@@ -79,20 +86,14 @@ module Api
 
       private
 
-      def find_application_and_chat
-        # Any authenticated user can access any application/chat for viewing/creating messages
-        @application = Application.find_by(token: params[:token])
-        @chat = @application&.chats&.find_by(number: params[:chat_number])
-      end
-
       def get_next_message_number(token, chat_number)
         # Atomically increment and get the next message number from Redis
         key = "message_counter:#{token}:#{chat_number}"
         
         unless REDIS.exists?(key)
           # Fetch current count from database and initialize Redis
-          count = Chat.find_by(token: token,number: chat_number).pick(:messages_count) || 0
-          REDIS.setnx(key, count)
+          count = Chat.where(token: token, number: chat_number).pick(:messages_count) || 0
+          REDIS.set(key, count)
         end
         
         # Atomically increment and get new value
@@ -108,7 +109,7 @@ module Api
         # Publish to RabbitMQ for async processing
         msg_data = {
           token: token,
-          chatNumber: chat_number,
+          chatNumber: chat_number.to_i,
           messageNumber: message_number,
           senderId: sender_id,
           body: body,
@@ -122,8 +123,8 @@ module Api
         # Publish to RabbitMQ for async processing
         msg_data = {
           token: token,
-          chatNumber: chat_number,
-          messageNumber: message_number,
+          chatNumber: chat_number.to_i,
+          messageNumber: message_number.to_i,
           body: body
         }
         

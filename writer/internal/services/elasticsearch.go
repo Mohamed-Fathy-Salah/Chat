@@ -18,15 +18,14 @@ type ElasticsearchService struct {
 }
 
 type MessageDocument struct {
-	ID          int    `json:"id"`
-	ChatID      int    `json:"chat_id"`
-	Token       string `json:"token"`
-	ChatNumber  int    `json:"chat_number"`
-	Number      int    `json:"number"`
-	Body        string `json:"body"`
-	SenderID    int    `json:"sender_id"`
-	SenderName  string `json:"sender_name,omitempty"`
-	CreatedAt   string `json:"created_at"`
+	ID         int    `json:"id"`
+	Token      string `json:"token"`
+	ChatNumber int    `json:"chat_number"`
+	Number     int    `json:"number"`
+	Body       string `json:"body"`
+	SenderID   int    `json:"sender_id"`
+	SenderName string `json:"sender_name,omitempty"`
+	CreatedAt  string `json:"created_at"`
 }
 
 func NewElasticsearchService(client *database.ElasticsearchClient, ctx context.Context) *ElasticsearchService {
@@ -66,7 +65,6 @@ func (es *ElasticsearchService) createIndexIfNotExists() {
 		"mappings": {
 			"properties": {
 				"id": { "type": "integer" },
-				"chat_id": { "type": "integer" },
 				"token": { "type": "keyword" },
 				"chat_number": { "type": "integer" },
 				"number": { "type": "integer" },
@@ -131,7 +129,7 @@ func (es *ElasticsearchService) UpdateMessage(token string, chatNumber int, mess
 	docID := fmt.Sprintf("%s:%d:%d", token, chatNumber, messageNumber)
 
 	// Update only the body field
-	updateDoc := map[string]interface{}{
+	updateDoc := map[string]any{
 		"doc": map[string]interface{}{
 			"body": body,
 		},
@@ -160,79 +158,4 @@ func (es *ElasticsearchService) UpdateMessage(token string, chatNumber int, mess
 	}
 
 	return nil
-}
-
-func (es *ElasticsearchService) SearchMessages(token string, chatNumber int, query string) ([]MessageDocument, error) {
-	// Build search query
-	searchQuery := map[string]interface{}{
-		"query": map[string]interface{}{
-			"bool": map[string]interface{}{
-				"must": []map[string]interface{}{
-					{
-						"term": map[string]interface{}{
-							"token": token,
-						},
-					},
-					{
-						"term": map[string]interface{}{
-							"chat_number": chatNumber,
-						},
-					},
-					{
-						"match": map[string]interface{}{
-							"body": query,
-						},
-					},
-				},
-			},
-		},
-		"sort": []map[string]interface{}{
-			{
-				"created_at": map[string]string{
-					"order": "desc",
-				},
-			},
-		},
-	}
-
-	data, err := json.Marshal(searchQuery)
-	if err != nil {
-		return nil, err
-	}
-
-	res, err := es.client.Search(
-		es.client.Search.WithContext(es.ctx),
-		es.client.Search.WithIndex("messages"),
-		es.client.Search.WithBody(bytes.NewReader(data)),
-	)
-	if err != nil {
-		return nil, err
-	}
-	defer res.Body.Close()
-
-	if res.IsError() {
-		return nil, fmt.Errorf("error searching: %s", res.String())
-	}
-
-	// Parse response
-	var result map[string]interface{}
-	if err := json.NewDecoder(res.Body).Decode(&result); err != nil {
-		return nil, err
-	}
-
-	hits := result["hits"].(map[string]interface{})["hits"].([]interface{})
-	
-	messages := make([]MessageDocument, 0, len(hits))
-	for _, hit := range hits {
-		source := hit.(map[string]interface{})["_source"]
-		sourceBytes, _ := json.Marshal(source)
-		
-		var msg MessageDocument
-		if err := json.Unmarshal(sourceBytes, &msg); err != nil {
-			continue
-		}
-		messages = append(messages, msg)
-	}
-
-	return messages, nil
 }
