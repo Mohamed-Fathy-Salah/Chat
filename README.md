@@ -344,12 +344,22 @@ cd requests
 bundle exec rspec
 ```
 
-**Test Coverage:**
-- Model validations
-- API endpoint functionality
-- Authentication flows
-- Redis counter operations
-- RabbitMQ message publishing
+### Test Coverage
+
+The Requests Service has comprehensive test coverage with **16 test files** and **1,725+ lines of test code** covering:
+
+- **Models**: Validations, associations, callbacks, and edge cases
+- **Requests/Integration**: All API endpoints, authentication, error handling, pagination
+- **Services**: JWT authentication, message search, RabbitMQ integration
+- **Redis**: Counter operations and race conditions
+- **Error Scenarios**: 401, 403, 404, 422 responses and edge cases
+
+Run with documentation format to see all test descriptions:
+```bash
+bundle exec rspec --format documentation
+```
+
+See the [Requests Service README](./requests/README.md#testing) for detailed test documentation.
 
 ---
 <h2 align="center"> Monitoring & Debugging </h2>

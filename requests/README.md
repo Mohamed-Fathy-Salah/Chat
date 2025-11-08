@@ -90,6 +90,56 @@ Run the test suite:
 bundle exec rspec
 ```
 
+### Test Coverage
+
+The test suite includes comprehensive coverage for:
+
+**Model Tests:**
+- User authentication and validation
+- Application token generation and uniqueness
+- Chat and Message associations
+- Edge cases and data integrity
+- Dependent record cascading
+
+**Request/Integration Tests:**
+- Authentication flows (register, login, logout, token refresh)
+- Application CRUD operations
+- Chat creation and listing
+- Message CRUD and search operations
+- Error handling (401, 403, 404, 422)
+- Authorization and access control
+- Pagination and filtering
+- Redis counter operations
+- RabbitMQ message publishing
+
+**Service Tests:**
+- JWT encoding/decoding and secret key rotation
+- Message search (Elasticsearch and SQL fallback)
+- RabbitMQ connection and publishing
+- Error handling and graceful degradation
+
+**Total Test Files:** 16  
+**Test Lines:** 1,725+ lines of test code
+
+### Running Specific Tests
+
+```bash
+# Run only model tests
+bundle exec rspec spec/models
+
+# Run only request tests
+bundle exec rspec spec/requests
+
+# Run only service tests
+bundle exec rspec spec/services
+
+# Run a specific test file
+bundle exec rspec spec/services/message_search_service_spec.rb
+
+# Run tests with documentation format
+bundle exec rspec --format documentation
+```
+
 ## Environment Variables
 
 - `DATABASE_HOST` - MySQL database host
