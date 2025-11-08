@@ -47,3 +47,15 @@ func (r *RedisClient) SetString(key, value string) error {
 func (r *RedisClient) Context() context.Context {
 	return r.ctx
 }
+
+func (r *RedisClient) SAdd(key string, members ...any) error {
+	return r.Client.SAdd(r.ctx, key, members...).Err()
+}
+
+func (r *RedisClient) SMembers(key string) ([]string, error) {
+	return r.Client.SMembers(r.ctx, key).Result()
+}
+
+func (r *RedisClient) Del(keys ...string) error {
+	return r.Client.Del(r.ctx, keys...).Err()
+}

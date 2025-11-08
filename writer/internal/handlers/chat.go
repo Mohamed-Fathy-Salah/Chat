@@ -8,11 +8,15 @@ import (
 )
 
 type ChatHandler struct {
-	db *database.DB
+	db          *database.DB
+	redisClient *database.RedisClient
 }
 
-func NewChatHandler(db *database.DB) *ChatHandler {
-	return &ChatHandler{db: db}
+func NewChatHandler(db *database.DB, redisClient *database.RedisClient) *ChatHandler {
+	return &ChatHandler{
+		db:          db,
+		redisClient: redisClient,
+	}
 }
 
 func (h *ChatHandler) CreateChat(msg models.CreateChatMessage) error {
@@ -29,5 +33,17 @@ func (h *ChatHandler) CreateChat(msg models.CreateChatMessage) error {
 		VALUES (?, ?, ?, ?, NOW(), NOW())
 	`, appID, msg.Token, msg.ChatNumber, msg.CreatorID)
 
-	return err
+	if err != nil {
+		return err
+	}
+
+	// Add token to Redis set for tracking changes
+	if h.redisClient != nil {
+		if err := h.redisClient.SAdd("chat_changes", msg.Token); err != nil {
+			// Log but don't fail the operation
+			fmt.Printf("Warning: Failed to add to chat_changes set: %v\n", err)
+		}
+	}
+
+	return nil
 }

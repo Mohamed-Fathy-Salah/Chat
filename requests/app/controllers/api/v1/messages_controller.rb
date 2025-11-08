@@ -86,25 +86,22 @@ module Api
       end
 
       def get_next_message_number(token, chat_number)
-        # Increment and get the next message number from Redis
-        # Format: "1<count>" where 1 = modified flag
+        # Atomically increment and get the next message number from Redis
         key = "message_counter:#{token}:#{chat_number}"
-        value = REDIS.get(key)
         
-        if value.nil?
-          # Fetch current count from database
-          chat = Chat.joins(:application)
-                     .where(applications: { token: token })
-                     .find_by(number: chat_number)
-          count = chat ? chat.messages_count + 1 : 1
-        else
-          # Extract count (remove first digit which is the modified flag)
-          count = value[1..-1].to_i + 1
+        unless REDIS.exists?(key)
+          # Fetch current count from database and initialize Redis
+          count = Chat.find_by(token: token,number: chat_number).pick(:messages_count) || 0
+          REDIS.setnx(key, count)
         end
         
-        # Store with modified flag set to 1
-        REDIS.set(key, "1#{count}")
-        count
+        # Atomically increment and get new value
+        new_count = REDIS.incr(key)
+        
+        # Add to change tracking set
+        REDIS.sadd('message_changes', "#{token}:#{chat_number}")
+        
+        new_count
       end
 
       def publish_message_creation(token, chat_number, message_number, sender_id, body)

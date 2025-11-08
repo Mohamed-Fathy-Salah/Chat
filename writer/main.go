@@ -57,8 +57,8 @@ func main() {
 	}
 
 	// Initialize handlers
-	chatHandler := handlers.NewChatHandler(db)
-	messageHandler := handlers.NewMessageHandler(db, esService)
+	chatHandler := handlers.NewChatHandler(db, redisClient)
+	messageHandler := handlers.NewMessageHandler(db, esService, redisClient)
 
 	// Initialize consumers
 	chatConsumer := queue.NewChatConsumer(rabbit, chatHandler)

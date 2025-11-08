@@ -39,23 +39,24 @@ module Api
       end
 
       def get_next_chat_number(token)
-        # Increment and get the next chat number from Redis
-        # Format: "1<count>" where 1 = modified flag
+        # Atomically increment and get the next chat number from Redis
         key = "chat_counter:#{token}"
-        value = REDIS.get(key)
+        count = REDIS.get(key)
         
-        if value.nil?
-          # Fetch current count from database
+        if count.nil?
+          # Fetch current count from database and initialize Redis
           app = Application.find_by(token: token)
-          count = app ? app.chats_count + 1 : 1
-        else
-          # Extract count (remove first digit which is the modified flag)
-          count = value[1..-1].to_i + 1
+          count = app ? app.chats_count : 0
+          REDIS.set(key, count)
         end
         
-        # Store with modified flag set to 1
-        REDIS.set(key, "1#{count}")
-        count
+        # Atomically increment and get new value
+        new_count = REDIS.incr(key)
+        
+        # Add to change tracking set
+        REDIS.sadd('chat_changes', token)
+        
+        new_count
       end
 
       def publish_chat_creation(token, chat_number, creator_id)

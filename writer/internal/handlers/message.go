@@ -11,14 +11,16 @@ import (
 )
 
 type MessageHandler struct {
-	db        *database.DB
-	esService *services.ElasticsearchService
+	db          *database.DB
+	esService   *services.ElasticsearchService
+	redisClient *database.RedisClient
 }
 
-func NewMessageHandler(db *database.DB, esService *services.ElasticsearchService) *MessageHandler {
+func NewMessageHandler(db *database.DB, esService *services.ElasticsearchService, redisClient *database.RedisClient) *MessageHandler {
 	return &MessageHandler{
-		db:        db,
-		esService: esService,
+		db:          db,
+		esService:   esService,
+		redisClient: redisClient,
 	}
 }
 
@@ -74,6 +76,15 @@ func (h *MessageHandler) CreateMessage(msg models.CreateMessageMessage) error {
 			log.Printf("Warning: Failed to index message in Elasticsearch: %v", err)
 		} else {
 			log.Printf("Indexed message %d in Elasticsearch", msg.MessageNumber)
+		}
+	}
+
+	// Add token:chatNumber to Redis set for tracking changes
+	if h.redisClient != nil {
+		key := fmt.Sprintf("%s:%d", msg.Token, msg.ChatNumber)
+		if err := h.redisClient.SAdd("message_changes", key); err != nil {
+			// Log but don't fail the operation
+			log.Printf("Warning: Failed to add to message_changes set: %v", err)
 		}
 	}
 

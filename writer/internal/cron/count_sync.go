@@ -16,15 +16,15 @@ type CountSync struct {
 	redisClient *database.RedisClient
 }
 
-type ChatCountUpdate struct {
+type CountUpdate struct {
 	Token string
 	Count int
 }
 
-type MessageCountUpdate struct {
-	Token      string
-	ChatNumber int
-	Count      int
+type messageUpdate struct {
+	token      string
+	chatNumber int
+	count      int
 }
 
 func NewCountSync(db *database.DB, redisClient *database.RedisClient) *CountSync {
@@ -59,153 +59,145 @@ func (cs *CountSync) syncCounts() {
 }
 
 func (cs *CountSync) syncChatsCount() error {
-	// Get all application tokens
-	rows, err := cs.db.Query("SELECT token FROM applications")
+	// Get all changed tokens from Redis set
+	tokens, err := cs.redisClient.SMembers("chat_changes")
 	if err != nil {
-		return err
-	}
-	defer rows.Close()
-
-	var tokens []string
-	for rows.Next() {
-		var token string
-		if err := rows.Scan(&token); err != nil {
-			continue
-		}
-		tokens = append(tokens, token)
+		return fmt.Errorf("failed to get chat_changes set: %w", err)
 	}
 
-	// Collect all updates to batch
-	updates := []ChatCountUpdate{}
+	if len(tokens) == 0 {
+		return nil
+	}
 
-	for _, token := range tokens {
-		redisKey := fmt.Sprintf("chat_counter:%s", token)
-		value, err := cs.redisClient.GetString(redisKey)
-		if err != nil {
-			if err != redis.Nil {
-				log.Printf("Error getting Redis key %s: %v", redisKey, err)
-			}
-			continue
-		}
+	// Clear the set immediately to avoid reprocessing
+	if err := cs.redisClient.Del("chat_changes"); err != nil {
+		log.Printf("Warning: Failed to clear chat_changes set: %v", err)
+	}
 
-		// Check if value has been modified (first character is '1')
-		if len(value) > 0 && value[0] == '1' {
-			// Extract count (everything after first character)
-			count, err := strconv.Atoi(value[1:])
+	batchSize := 100
+	totalSynced := 0
+
+	// Process tokens in batches
+	for i := 0; i < len(tokens); i += batchSize {
+		end := min(i + batchSize, len(tokens))
+		batchTokens := tokens[i:end]
+
+		var updates []CountUpdate
+		for _, token := range batchTokens {
+			// Get count from Redis counter
+			redisKey := fmt.Sprintf("chat_counter:%s", token)
+			count, err := cs.redisClient.GetInt(redisKey)
 			if err != nil {
-				log.Printf("Error parsing count from %s: %v", value, err)
+				if err != redis.Nil {
+					log.Printf("Error getting Redis key %s: %v", redisKey, err)
+				}
 				continue
 			}
 
-			updates = append(updates, ChatCountUpdate{
+			updates = append(updates, CountUpdate{
 				Token: token,
 				Count: count,
 			})
+		}
 
-			// Reset modified flag (set first character to '0')
-			newValue := "0" + value[1:]
-			if err := cs.redisClient.SetString(redisKey, newValue); err != nil {
-				log.Printf("Error resetting flag for %s: %v", redisKey, err)
+		// Update database for this batch
+		if len(updates) > 0 {
+			if err := cs.batchUpdateChatsCount(updates); err != nil {
+				log.Printf("Error in batch update chats count: %v", err)
+				return err
 			}
+			totalSynced += len(updates)
 		}
 	}
 
-	// Batch update database
-	if len(updates) > 0 {
-		if err := cs.batchUpdateChatsCount(updates); err != nil {
-			log.Printf("Error in batch update chats count: %v", err)
-			return err
-		}
-		log.Printf("Synced %d chat counts", len(updates))
+	if totalSynced > 0 {
+		log.Printf("Synced %d chat counts", totalSynced)
 	}
 
 	return nil
 }
 
 func (cs *CountSync) syncMessagesCount() error {
-	// Get all chats
-	rows, err := cs.db.Query(`
-		SELECT a.token, c.number 
-		FROM chats c 
-		JOIN applications a ON c.application_id = a.id
-	`)
+	// Get all changed token:chatNumber from Redis set
+	chatKeys, err := cs.redisClient.SMembers("message_changes")
 	if err != nil {
-		return err
-	}
-	defer rows.Close()
-
-	type chatKey struct {
-		token      string
-		chatNumber int
+		return fmt.Errorf("failed to get message_changes set: %w", err)
 	}
 
-	var chatKeys []chatKey
-	for rows.Next() {
-		var token string
-		var chatNumber int
-		if err := rows.Scan(&token, &chatNumber); err != nil {
-			continue
-		}
-		chatKeys = append(chatKeys, chatKey{token, chatNumber})
+	if len(chatKeys) == 0 {
+		return nil
 	}
 
-	// Collect all updates to batch
-	updates := []MessageCountUpdate{}
+	// Clear the set immediately to avoid reprocessing
+	if err := cs.redisClient.Del("message_changes"); err != nil {
+		log.Printf("Warning: Failed to clear message_changes set: %v", err)
+	}
 
-	for _, ck := range chatKeys {
-		redisKey := fmt.Sprintf("message_counter:%s:%d", ck.token, ck.chatNumber)
-		value, err := cs.redisClient.GetString(redisKey)
-		if err != nil {
-			if err != redis.Nil {
-				log.Printf("Error getting Redis key %s: %v", redisKey, err)
+	batchSize := 100
+	totalSynced := 0
+
+	// Process chat keys in batches
+	for i := 0; i < len(chatKeys); i += batchSize {
+		end := min(i + batchSize, len(chatKeys))
+		batchChatKeys := chatKeys[i:end]
+
+		var updates []messageUpdate
+		for _, key := range batchChatKeys {
+			parts := strings.SplitN(key, ":", 2)
+			if len(parts) != 2 {
+				log.Printf("Invalid chat key format: %s", key)
+				continue
 			}
-			continue
-		}
-
-		// Check if value has been modified (first character is '1')
-		if len(value) > 0 && value[0] == '1' {
-			// Extract count (everything after first character)
-			count, err := strconv.Atoi(value[1:])
+			token := parts[0]
+			chatNumber, err := strconv.Atoi(parts[1])
 			if err != nil {
-				log.Printf("Error parsing count from %s: %v", value, err)
+				log.Printf("Invalid chat number in key %s: %v", key, err)
 				continue
 			}
 
-			updates = append(updates, MessageCountUpdate{
-				Token:      ck.token,
-				ChatNumber: ck.chatNumber,
-				Count:      count,
-			})
-
-			// Reset modified flag (set first character to '0')
-			newValue := "0" + value[1:]
-			if err := cs.redisClient.SetString(redisKey, newValue); err != nil {
-				log.Printf("Error resetting flag for %s: %v", redisKey, err)
+			// Get count from Redis counter
+			redisKey := fmt.Sprintf("message_counter:%s:%d", token, chatNumber)
+			count, err := cs.redisClient.GetInt(redisKey)
+			if err != nil {
+				if err != redis.Nil {
+					log.Printf("Error getting Redis key %s: %v", redisKey, err)
+				}
+				continue
 			}
+
+			updates = append(updates, messageUpdate{
+				token:      token,
+				chatNumber: chatNumber,
+				count:      count,
+			})
+		}
+
+		// Update database for this batch
+		if len(updates) > 0 {
+			if err := cs.batchUpdateMessagesCount(updates); err != nil {
+				log.Printf("Error in batch update messages count: %v", err)
+				return err
+			}
+			totalSynced += len(updates)
 		}
 	}
 
-	// Batch update database
-	if len(updates) > 0 {
-		if err := cs.batchUpdateMessagesCount(updates); err != nil {
-			log.Printf("Error in batch update messages count: %v", err)
-			return err
-		}
-		log.Printf("Synced %d message counts", len(updates))
+	if totalSynced > 0 {
+		log.Printf("Synced %d message counts", totalSynced)
 	}
 
 	return nil
 }
 
-func (cs *CountSync) batchUpdateChatsCount(updates []ChatCountUpdate) error {
+func (cs *CountSync) batchUpdateChatsCount(updates []CountUpdate) error {
 	if len(updates) == 0 {
 		return nil
 	}
 
-	// Build batch update query using CASE statement
+	// Build batch update query using CASE statement with token
 	var tokens []string
 	var whenClauses []string
-	
+
 	for _, update := range updates {
 		tokens = append(tokens, fmt.Sprintf("'%s'", update.Token))
 		whenClauses = append(whenClauses, fmt.Sprintf("WHEN '%s' THEN %d", update.Token, update.Count))
@@ -223,27 +215,25 @@ func (cs *CountSync) batchUpdateChatsCount(updates []ChatCountUpdate) error {
 	return err
 }
 
-func (cs *CountSync) batchUpdateMessagesCount(updates []MessageCountUpdate) error {
+func (cs *CountSync) batchUpdateMessagesCount(updates []messageUpdate) error {
 	if len(updates) == 0 {
 		return nil
 	}
 
-	// Build batch update query using CASE statement
+	// Build batch update query using CASE statement with token and chatNumber
 	var conditions []string
 	var whenClauses []string
-	
+
 	for _, update := range updates {
-		condition := fmt.Sprintf("(a.token = '%s' AND c.number = %d)", update.Token, update.ChatNumber)
-		conditions = append(conditions, condition)
+		conditions = append(conditions, fmt.Sprintf("(token = '%s' AND number = %d)", update.token, update.chatNumber))
 		whenClauses = append(whenClauses, 
-			fmt.Sprintf("WHEN a.token = '%s' AND c.number = %d THEN %d", 
-				update.Token, update.ChatNumber, update.Count))
+			fmt.Sprintf("WHEN token = '%s' AND number = %d THEN %d", 
+				update.token, update.chatNumber, update.count))
 	}
 
 	query := fmt.Sprintf(`
-		UPDATE chats c
-		JOIN applications a ON c.application_id = a.id
-		SET c.messages_count = CASE
+		UPDATE chats
+		SET messages_count = CASE
 			%s
 		END
 		WHERE %s
