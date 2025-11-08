@@ -1,10 +1,152 @@
 <h2 align="center"> Description </h2>
 
+A distributed chat application system built with Ruby on Rails (API service) and Go (async worker service). The system provides RESTful APIs for managing applications, chats, and messages with full-text search capabilities using Elasticsearch. Designed for high availability and eventual consistency with asynchronous message processing.
+
+**Key Technologies:**
+- **Backend API**: Ruby on Rails 7
+- **Worker Service**: Go
+- **Database**: MySQL 8.0
+- **Cache & Counters**: Redis 7
+- **Message Queue**: RabbitMQ 3
+- **Search Engine**: Elasticsearch 8.11
+
 ---
 <h2 align="center"> Installation </h2>
 
+### Prerequisites
+
+- Docker & Docker Compose
+- Git
+
+### Quick Start
+
+1. **Clone the repository:**
+```bash
+git clone https://github.com/Mohamed-Fathy-Salah/Chat.git
+cd chat
+```
+
+2. **Start all services:**
+```bash
+docker-compose up -d
+```
+
+This will start:
+- MySQL database (port 3306)
+- Redis (port 6379)
+- RabbitMQ (port 5672, management UI: 15672)
+- Elasticsearch (port 9200)
+- Requests API service (port 3000)
+- Writer worker service
+
+3. **Verify services are running:**
+```bash
+docker-compose ps
+```
+
+4. **View logs:**
+```bash
+docker-compose logs -f
+```
+
+5. **Access the API:**
+```
+Base URL: http://localhost:3000/api/v1
+Swagger API Docs: http://localhost:3000/api-docs/index.html
+RabbitMQ Management: http://localhost:15672 (guest/guest)
+Elasticsearch: http://localhost:9200
+```
+
+### Development Setup
+
+#### Requests Service (Ruby on Rails)
+```bash
+cd requests
+bundle install
+rails db:create db:migrate
+rails server
+```
+
+#### Writer Service (Go)
+```bash
+cd writer
+go mod download
+go run main.go
+```
+
+### Environment Variables
+
+Copy `.env.example` in the requests directory and adjust as needed:
+```bash
+cp requests/.env.example requests/.env
+```
+
 ---
 <h2 align="center"> API Docs </h2>
+
+### Authentication
+
+All endpoints (except registration and login) require JWT authentication via cookies.
+
+**Auth Endpoints:**
+- `POST /api/v1/auth/register` - Register a new user
+- `POST /api/v1/auth/login` - Login and receive JWT token in cookie
+- `DELETE /api/v1/auth/logout` - Logout and clear auth token
+- `GET /api/v1/auth/me` - Get current authenticated user
+- `POST /api/v1/auth/refresh` - Refresh authentication token
+
+### Interactive API Documentation
+
+Swagger UI is available at: **http://localhost:3000/api-docs/index.html**
+
+Use the Swagger interface to explore and test all API endpoints interactively.
+
+### Example Requests
+
+**Register:**
+```bash
+curl -X POST http://localhost:3000/api/v1/auth/register \
+  -H "Content-Type: application/json" \
+  -d '{"name": "John Doe", "email": "john@example.com", "password": "password123"}'
+```
+
+**Login:**
+```bash
+curl -X POST http://localhost:3000/api/v1/auth/login \
+  -H "Content-Type: application/json" \
+  -c cookies.txt \
+  -d '{"email": "john@example.com", "password": "password123"}'
+```
+
+**Create Application:**
+```bash
+curl -X POST http://localhost:3000/api/v1/applications \
+  -H "Content-Type: application/json" \
+  -b cookies.txt \
+  -d '{"name": "My App"}'
+```
+
+**Create Chat:**
+```bash
+curl -X POST http://localhost:3000/api/v1/applications/{token}/chats \
+  -b cookies.txt
+```
+
+**Create Message:**
+```bash
+curl -X POST http://localhost:3000/api/v1/applications/{token}/chats/1/messages \
+  -H "Content-Type: application/json" \
+  -b cookies.txt \
+  -d '{"body": "Hello, World!"}'
+```
+
+**Search Messages:**
+```bash
+curl "http://localhost:3000/api/v1/applications/{token}/chats/1/messages/search?q=hello" \
+  -b cookies.txt
+```
+
+For complete API documentation, see the [Requests Service README](./requests/README.md).
 
 ---
 <h2 align="center"> Functional requirements </h2>
@@ -113,8 +255,9 @@
 **Action**
 - Create a new chat in the database
 
-### ⏱️ Cron Job (every N minutes)
+### ⏱️ Cron Job (every 10 seconds)
 
+Runs in the **Writer Service** (not Requests Service):
 - Read from Redis keys  
 - Update chats count in **applications**  
 - Update messages count in **chats**
@@ -189,3 +332,134 @@ erDiagram
 |--------|--------|--------|--------|--------|
 |Chats|`token`|B-Tree| false | false |
 |Messages|`<token>:<charNumber>`|B-Tree| false | false |
+
+---
+<h2 align="center"> Testing </h2>
+
+### Running Tests
+
+**Requests Service (RSpec):**
+```bash
+cd requests
+bundle exec rspec
+```
+
+**Test Coverage:**
+- Model validations
+- API endpoint functionality
+- Authentication flows
+- Redis counter operations
+- RabbitMQ message publishing
+
+---
+<h2 align="center"> Monitoring & Debugging </h2>
+
+### Health Checks
+
+All services include health checks in docker-compose:
+- MySQL: `mysqladmin ping`
+- Redis: `redis-cli ping`
+- RabbitMQ: `rabbitmq-diagnostics ping`
+- Elasticsearch: HTTP GET `/_cluster/health`
+
+### View Service Logs
+
+```bash
+# All services
+docker-compose logs -f
+
+# Specific service
+docker-compose logs -f requests
+docker-compose logs -f writer
+
+# Last 100 lines
+docker-compose logs --tail=100 writer
+```
+
+### RabbitMQ Management UI
+
+Access at `http://localhost:15672` (guest/guest) to:
+- Monitor queue depths
+- View message rates
+- Debug consumer connections
+- Check for failed messages
+
+### Elasticsearch Viewer
+
+Use the included viewer script:
+```bash
+./es-viewer.sh
+```
+
+### Redis Monitoring
+
+```bash
+# Connect to Redis CLI
+docker-compose exec redis redis-cli
+
+# Monitor commands
+MONITOR
+
+# Check keys
+KEYS *
+
+# View counter value
+GET <token>:<chatNumber>
+```
+
+---
+<h2 align="center"> Troubleshooting </h2>
+
+### Common Issues
+
+**Services won't start:**
+```bash
+# Clean up and restart
+docker-compose down -v
+docker-compose up -d --build
+```
+
+**Database migration errors:**
+```bash
+docker-compose exec requests rails db:drop db:create db:migrate
+```
+
+**Port conflicts:**
+Check if ports 3000, 3306, 5672, 6379, 9200, or 15672 are in use:
+```bash
+lsof -i :3000
+```
+
+**RabbitMQ messages stuck in queue:**
+- Check writer service logs
+- Verify database connectivity
+- Restart writer service: `docker-compose restart writer`
+
+**Counts not updating:**
+- Verify cron job is running in writer service
+- Check Redis for counter keys
+- Manually trigger: View writer logs to see sync operations
+
+---
+<h2 align="center"> Architecture Notes </h2>
+
+### Why Eventual Consistency?
+
+The system prioritizes availability over immediate consistency:
+- **Write Operations**: Return immediately after queuing (fast response)
+- **Count Updates**: Updated periodically by cron job (reduces database locks)
+- **High Read:Write Ratio**: Optimized for reading messages/chats frequently
+
+### Scalability Considerations
+
+1. **Horizontal Scaling**: Multiple requests/writer instances can run concurrently
+2. **Redis Counters**: Atomic increments prevent race conditions
+3. **RabbitMQ**: Distributes work across multiple consumers
+4. **Database Indexing**: Optimized queries for token-based lookups
+
+### Security Features
+
+- JWT-based authentication with HTTP-only cookies
+- Password hashing with bcrypt
+- No internal IDs exposed to clients (token-based addressing)
+- CORS configuration for cross-origin requests
