@@ -4,7 +4,7 @@ class ApplicationController < ActionController::API
 
   before_action :authenticate_request
 
-  attr_reader :current_user
+  attr_reader :current_user_id
 
   private
 
@@ -15,9 +15,10 @@ class ApplicationController < ActionController::API
     payload = AuthenticationService.decode_token(token)
     return render_unauthorized unless payload
 
-    @current_user = User.find_by(id: payload['user_id'])
-    render_unauthorized unless @current_user
-  rescue ActiveRecord::RecordNotFound
+    # Store only user_id, don't query database
+    @current_user_id = payload['user_id']
+    render_unauthorized unless @current_user_id
+  rescue
     render_unauthorized
   end
 
@@ -36,8 +37,9 @@ class ApplicationController < ActionController::API
     payload = AuthenticationService.decode_token(token)
     return unless payload
 
-    @current_user = User.find_by(id: payload['user_id'])
-  rescue ActiveRecord::RecordNotFound
-    @current_user = nil
+    # Store only user_id, don't query database
+    @current_user_id = payload['user_id']
+  rescue
+    @current_user_id = nil
   end
 end

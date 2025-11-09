@@ -52,17 +52,17 @@ module Api
       end
 
       def me
-        render json: { user: user_response(current_user) }
+        user = User.find(current_user_id)
+        render json: { user: user_response(user) }
       end
 
       def refresh
         # Generate new token with same user_id
-        token = AuthenticationService.encode_token(user_id: current_user.id)
+        token = AuthenticationService.encode_token(user_id: current_user_id)
         set_auth_cookie(token)
         
         render json: { 
-          message: 'Token refreshed successfully',
-          user: user_response(current_user)
+          message: 'Token refreshed successfully'
         }
       end
 

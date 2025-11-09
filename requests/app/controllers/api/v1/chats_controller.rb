@@ -17,7 +17,7 @@ module Api
         chat_number = get_next_chat_number(validator.token)
 
         # Publish to RabbitMQ for async processing
-        publish_chat_creation(validator.token, chat_number, current_user.id)
+        publish_chat_creation(validator.token, chat_number, current_user_id)
         
         render json: { chatNumber: chat_number }, status: :created
       end
@@ -38,6 +38,7 @@ module Api
 
         chats = Chat.where(token: validator.token)
                     .select(:number, :messages_count)
+                    .order(id: :desc)
                     .limit(limit)
                     .offset(offset)
 

@@ -17,7 +17,7 @@ module Api
         message_number = get_next_message_number(validator.token, validator.chat_number)
 
         # Publish to RabbitMQ for async processing
-        publish_message_creation(validator.token, validator.chat_number, message_number, current_user.id, validator.body)
+        publish_message_creation(validator.token, validator.chat_number, message_number, current_user_id, validator.body)
         
         render json: { messageNumber: message_number }, status: :ok
       end
@@ -35,7 +35,7 @@ module Api
         elsif message != current_user.id
           render json: { error: 'You can only edit your own messages' }, status: :forbidden
         else
-          # Publish to RabbitMQ for async processing
+          # Publish to Elasticsearch for async indexing
           publish_message_update(validator.token, validator.chat_number, validator.message_number, validator.body)
           
           head :ok
@@ -78,14 +78,11 @@ module Api
         validator = validate_params(MessageParamsValidator, :search)
         return unless validator
 
-        # Just verify chat exists
-        unless Chat.where(token: validator.token, number: validator.chat_number).exists?
-          return render json: { error: 'Chat not found' }, status: :not_found
-        end
-
         page = validator.page_value
         limit = validator.limit_value
 
+        # Search directly in Elasticsearch - no need to check if chat exists
+        # If chat doesn't exist, Elasticsearch will return empty results
         messages = MessageSearchService.search(validator.token, validator.chat_number, validator.query, page, limit)
 
         render json: messages.map { |msg|

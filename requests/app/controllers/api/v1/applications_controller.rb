@@ -8,7 +8,10 @@ module Api
         validator = validate_params(ApplicationParamsValidator, :create)
         return unless validator
 
-        application = current_user.applications.new(name: validator.name)
+        application = Application.new(
+          name: validator.name,
+          creator_id: current_user_id
+        )
 
         if application.save
           render json: { token: application.token }, status: :created
@@ -22,15 +25,19 @@ module Api
         validator = validate_params(ApplicationParamsValidator, :update)
         return unless validator
 
-        # Only allow users to update their own applications
-        application = current_user.applications.find_by(token: validator.token)
+        # Update without reading first - single query
+        rows_updated = Application.where(
+          token: validator.token,
+          creator_id: current_user_id
+        ).update_all(
+          name: validator.name,
+          updated_at: Time.current
+        )
 
-        if application.nil?
+        if rows_updated.zero?
           render json: { error: 'Application not found or you do not have permission to edit it' }, status: :forbidden
-        elsif application.update(name: validator.name)
-          head :ok
         else
-          render json: { errors: application.errors.full_messages }, status: :unprocessable_entity
+          head :ok
         end
       end
 
@@ -45,6 +52,7 @@ module Api
         offset = (page - 1) * limit
 
         applications = Application.select(:token, :name, :chats_count)
+                                  .order(id: :desc)
                                   .limit(limit)
                                   .offset(offset)
 

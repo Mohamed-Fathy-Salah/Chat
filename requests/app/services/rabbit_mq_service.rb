@@ -12,7 +12,17 @@ class RabbitMqService
   end
 
   def self.publish(queue_name, message)
-    queue = channel.queue(queue_name, durable: true)
+    # Declare queue with DLX configuration to match writer service
+    dlx_name = "#{queue_name}.dlx"
+    
+    # Declare queue with dead letter exchange (matches writer Go service)
+    queue = channel.queue(queue_name, 
+      durable: true,
+      arguments: {
+        'x-dead-letter-exchange' => dlx_name
+      }
+    )
+    
     channel.default_exchange.publish(
       message,
       routing_key: queue.name,
