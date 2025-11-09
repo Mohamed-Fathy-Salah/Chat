@@ -48,6 +48,63 @@ func (r *RabbitMQ) DeclareQueue(ch *amqp.Channel, queueName string) (amqp.Queue,
 	)
 }
 
+// DeclareQueueWithDLQ declares a queue with dead letter exchange configured
+func (r *RabbitMQ) DeclareQueueWithDLQ(ch *amqp.Channel, queueName string) (amqp.Queue, error) {
+	dlxName := queueName + ".dlx"
+	dlqName := queueName + ".dlq"
+
+	// Declare dead letter exchange
+	err := ch.ExchangeDeclare(
+		dlxName,  // name
+		"fanout", // type
+		true,     // durable
+		false,    // auto-deleted
+		false,    // internal
+		false,    // no-wait
+		nil,      // arguments
+	)
+	if err != nil {
+		return amqp.Queue{}, err
+	}
+
+	// Declare dead letter queue
+	_, err = ch.QueueDeclare(
+		dlqName, // name
+		true,    // durable
+		false,   // delete when unused
+		false,   // exclusive
+		false,   // no-wait
+		nil,     // arguments
+	)
+	if err != nil {
+		return amqp.Queue{}, err
+	}
+
+	// Bind DLQ to DLX
+	err = ch.QueueBind(
+		dlqName, // queue name
+		"",      // routing key
+		dlxName, // exchange
+		false,   // no-wait
+		nil,     // arguments
+	)
+	if err != nil {
+		return amqp.Queue{}, err
+	}
+
+	// Declare main queue with DLX configured
+	return ch.QueueDeclare(
+		queueName, // name
+		true,      // durable
+		false,     // delete when unused
+		false,     // exclusive
+		false,     // no-wait
+		amqp.Table{
+			"x-dead-letter-exchange": dlxName,
+		},
+	)
+}
+
 func (r *RabbitMQ) Consume(ch *amqp.Channel, queueName string) (<-chan amqp.Delivery, error) {
 	return ch.Consume(
 		queueName, // queue

@@ -5,7 +5,9 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"sync"
 	"syscall"
+	"time"
 
 	"github.com/chat/writer/internal/config"
 	"github.com/chat/writer/internal/cron"
@@ -20,7 +22,8 @@ func main() {
 
 	// Load configuration
 	cfg := config.Load()
-	ctx := context.Background()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 
 	// Connect to MySQL
 	db, err := database.Connect(cfg.DatabaseHost, cfg.DatabaseUser, cfg.DatabasePassword, cfg.DatabaseName)
@@ -67,13 +70,34 @@ func main() {
 	// Initialize cron job
 	countSync := cron.NewCountSync(db, redisClient)
 
+	// WaitGroup to track all goroutines
+	var wg sync.WaitGroup
+
 	// Start consumers in separate goroutines
-	go chatConsumer.Start()
-	go messageConsumer.StartCreateConsumer()
-	go messageConsumer.StartUpdateConsumer()
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		chatConsumer.Start(ctx)
+	}()
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		messageConsumer.StartCreateConsumer(ctx)
+	}()
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		messageConsumer.StartUpdateConsumer(ctx)
+	}()
 
 	// Start cron job
-	go countSync.Start()
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		countSync.Start(ctx)
+	}()
 
 	log.Println("Writer Service started successfully")
 
@@ -83,4 +107,23 @@ func main() {
 	<-sigChan
 
 	log.Println("Shutting down Writer Service...")
+
+	// Cancel context to signal all goroutines to stop
+	cancel()
+
+	// Wait for all goroutines to finish with timeout
+	done := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		log.Println("All goroutines stopped gracefully")
+	case <-time.After(30 * time.Second):
+		log.Println("Shutdown timeout exceeded, forcing exit")
+	}
+
+	log.Println("Writer Service stopped")
 }

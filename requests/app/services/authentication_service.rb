@@ -1,81 +1,55 @@
 class AuthenticationService
-  SECRET_KEY_PREFIX = 'auth_secret_key'
-  KEY_ROTATION_INTERVAL = 2.days.to_i
-
   class << self
     def encode_token(payload)
       payload[:exp] = 7.days.from_now.to_i
-      JWT.encode(payload, current_secret_key, 'HS256')
+      JWT.encode(payload, secret_key, 'HS256')
     end
 
     def decode_token(token)
-      # Try current key first
-      begin
-        decoded = JWT.decode(token, current_secret_key, true, { algorithm: 'HS256' })
-        return decoded[0]
-      rescue JWT::DecodeError, JWT::ExpiredSignature
-        # Try previous key for rotation grace period
-        begin
-          decoded = JWT.decode(token, previous_secret_key, true, { algorithm: 'HS256' })
-          return decoded[0]
-        rescue JWT::DecodeError, JWT::ExpiredSignature
-          nil
-        end
-      end
+      decoded = JWT.decode(token, secret_key, true, { algorithm: 'HS256' })
+      decoded[0]
+    rescue JWT::DecodeError, JWT::ExpiredSignature => e
+      Rails.logger.warn "JWT decode failed: #{e.message}"
+      nil
     end
 
-    def current_secret_key
-      key = REDIS.get(current_key_name)
+    def generate_token(user_id:)
+      encode_token(user_id: user_id)
+    end
+
+    private
+
+    def secret_key
+      key = ENV['JWT_SECRET_KEY']
       
-      if key.nil?
-        key = generate_secret_key
-        store_secret_key(key)
+      if key.nil? || key.empty?
+        raise_missing_key_error
+      end
+      
+      if key.length < 32
+        Rails.logger.warn "JWT_SECRET_KEY is too short. Should be at least 32 characters."
       end
       
       key
     end
 
-    def previous_secret_key
-      REDIS.get(previous_key_name) || current_secret_key
-    end
-
-    def rotate_secret_key!
-      # Move current key to previous
-      current_key = current_secret_key
-      REDIS.set(previous_key_name, current_key, ex: KEY_ROTATION_INTERVAL)
+    def raise_missing_key_error
+      error_message = <<~ERROR
+        JWT_SECRET_KEY environment variable is not set!
+        
+        To generate a secure key, run:
+          rails secret
+        
+        Or use:
+          openssl rand -hex 64
+        
+        Then set it in your environment:
+          export JWT_SECRET_KEY='your_generated_key'
+        
+        For production, set it in your deployment environment.
+      ERROR
       
-      # Generate and store new key
-      new_key = generate_secret_key
-      store_secret_key(new_key)
-      
-      Rails.logger.info "Secret key rotated at #{Time.current}"
-      new_key
-    end
-
-    private
-
-    def generate_secret_key
-      SecureRandom.hex(64)
-    end
-
-    def store_secret_key(key)
-      REDIS.set(current_key_name, key, ex: KEY_ROTATION_INTERVAL * 2)
-    end
-
-    def current_key_name
-      "#{SECRET_KEY_PREFIX}:current"
-    end
-
-    def previous_key_name
-      "#{SECRET_KEY_PREFIX}:previous"
-    end
-
-    def key_rotation_timestamp
-      REDIS.get("#{SECRET_KEY_PREFIX}:last_rotation")&.to_i || 0
-    end
-
-    def should_rotate?
-      Time.current.to_i - key_rotation_timestamp > KEY_ROTATION_INTERVAL
+      raise ArgumentError, error_message
     end
   end
 end

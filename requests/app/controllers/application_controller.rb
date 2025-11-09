@@ -1,5 +1,6 @@
 class ApplicationController < ActionController::API
   include ActionController::Cookies
+  include Validatable
 
   before_action :authenticate_request
 

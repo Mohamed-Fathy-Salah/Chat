@@ -4,7 +4,15 @@ module Api
       skip_before_action :authenticate_request, only: [:register, :login]
 
       def register
-        user = User.new(user_params)
+        validator = validate_params(AuthParamsValidator, :register)
+        return unless validator
+
+        user = User.new(
+          email: validator.email&.downcase,
+          password: validator.password,
+          password_confirmation: validator.password_confirmation,
+          name: validator.name
+        )
         
         if user.save
           token = AuthenticationService.encode_token(user_id: user.id)
@@ -20,9 +28,12 @@ module Api
       end
 
       def login
-        user = User.find_by(email: params[:email]&.downcase)
+        validator = validate_params(AuthParamsValidator, :login)
+        return unless validator
+
+        user = User.find_by(email: validator.email&.downcase)
         
-        if user&.authenticate(params[:password])
+        if user&.authenticate(validator.password)
           token = AuthenticationService.encode_token(user_id: user.id)
           set_auth_cookie(token)
           

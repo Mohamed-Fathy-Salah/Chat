@@ -1,6 +1,7 @@
 package queue
 
 import (
+	"context"
 	"encoding/json"
 	"log"
 
@@ -9,27 +10,30 @@ import (
 )
 
 type ChatConsumer struct {
-	rabbit      *RabbitMQ
-	chatHandler *handlers.ChatHandler
+	rabbit       *RabbitMQ
+	chatHandler  *handlers.ChatHandler
+	retryHandler *RetryHandler
 }
 
 func NewChatConsumer(rabbit *RabbitMQ, chatHandler *handlers.ChatHandler) *ChatConsumer {
 	return &ChatConsumer{
-		rabbit:      rabbit,
-		chatHandler: chatHandler,
+		rabbit:       rabbit,
+		chatHandler:  chatHandler,
+		retryHandler: NewRetryHandler(),
 	}
 }
 
-func (c *ChatConsumer) Start() {
+func (c *ChatConsumer) Start(ctx context.Context) {
 	ch, err := c.rabbit.CreateChannel()
 	if err != nil {
 		log.Fatalf("Failed to open channel: %v", err)
 	}
 	defer ch.Close()
 
-	q, err := c.rabbit.DeclareQueue(ch, "create_chats")
+	queueName := "create_chats"
+	q, err := c.rabbit.DeclareQueueWithDLQ(ch, queueName)
 	if err != nil {
-		log.Fatalf("Failed to declare queue: %v", err)
+		log.Fatalf("Failed to declare queue with DLQ: %v", err)
 	}
 
 	msgs, err := c.rabbit.Consume(ch, q.Name)
@@ -39,20 +43,45 @@ func (c *ChatConsumer) Start() {
 
 	log.Println("Waiting for create_chats messages...")
 
-	for msg := range msgs {
-		var chatMsg models.CreateChatMessage
-		if err := json.Unmarshal(msg.Body, &chatMsg); err != nil {
-			log.Printf("Error unmarshaling message: %v", err)
-			msg.Nack(false, false)
-			continue
-		}
+	for {
+		select {
+		case <-ctx.Done():
+			log.Println("ChatConsumer: Shutting down gracefully...")
+			return
+		case msg, ok := <-msgs:
+			if !ok {
+				log.Println("ChatConsumer: Channel closed")
+				return
+			}
 
-		if err := c.chatHandler.CreateChat(chatMsg); err != nil {
-			log.Printf("Error creating chat: %v", err)
-			msg.Nack(false, true) // Requeue
-		} else {
-			msg.Ack(false)
-			log.Printf("Created chat %d for application %s", chatMsg.ChatNumber, chatMsg.Token)
+			// Log retry metrics if this is a retry
+			c.retryHandler.LogRetryMetrics(msg)
+
+			var chatMsg models.CreateChatMessage
+			if err := json.Unmarshal(msg.Body, &chatMsg); err != nil {
+				log.Printf("Error unmarshaling message: %v", err)
+				// Parsing errors shouldn't be retried - send to DLQ
+				msg.Nack(false, false)
+				continue
+			}
+
+			if err := c.chatHandler.CreateChat(chatMsg); err != nil {
+				log.Printf("Error creating chat: %v", err)
+				// Use retry handler with exponential backoff
+				if retryErr := c.retryHandler.HandleFailedMessage(ch, msg, queueName, err); retryErr != nil {
+					log.Printf("Error handling retry: %v", retryErr)
+					msg.Nack(false, false)
+				}
+			} else {
+				msg.Ack(false)
+				retryCount := c.retryHandler.GetRetryCount(msg)
+				if retryCount > 0 {
+					log.Printf("Successfully created chat %d for application %s after %d retries", 
+						chatMsg.ChatNumber, chatMsg.Token, retryCount)
+				} else {
+					log.Printf("Created chat %d for application %s", chatMsg.ChatNumber, chatMsg.Token)
+				}
+			}
 		}
 	}
 }

@@ -1,6 +1,7 @@
 package cron
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"strconv"
@@ -34,7 +35,7 @@ func NewCountSync(db *database.DB, redisClient *database.RedisClient) *CountSync
 	}
 }
 
-func (cs *CountSync) Start() {
+func (cs *CountSync) Start(ctx context.Context) {
 	ticker := time.NewTicker(10 * time.Second)
 	defer ticker.Stop()
 
@@ -43,8 +44,18 @@ func (cs *CountSync) Start() {
 	// Run immediately on start
 	cs.syncCounts()
 
-	for range ticker.C {
-		cs.syncCounts()
+	for {
+		select {
+		case <-ctx.Done():
+			log.Println("CountSync: Shutting down gracefully...")
+			// Perform final sync before stopping
+			log.Println("CountSync: Performing final sync...")
+			cs.syncCounts()
+			log.Println("CountSync: Final sync completed")
+			return
+		case <-ticker.C:
+			cs.syncCounts()
+		}
 	}
 }
 
@@ -194,13 +205,26 @@ func (cs *CountSync) batchUpdateChatsCount(updates []CountUpdate) error {
 		return nil
 	}
 
-	// Build batch update query using CASE statement with token
-	var tokens []string
+	// Use parameterized query to prevent SQL injection
+	// Build placeholders for CASE statement
 	var whenClauses []string
+	var args []interface{}
+	var tokenPlaceholders []string
 
+	placeholderIdx := 1
 	for _, update := range updates {
-		tokens = append(tokens, fmt.Sprintf("'%s'", update.Token))
-		whenClauses = append(whenClauses, fmt.Sprintf("WHEN '%s' THEN %d", update.Token, update.Count))
+		// WHEN ? THEN ?
+		whenClauses = append(whenClauses, fmt.Sprintf("WHEN ? THEN ?"))
+		args = append(args, update.Token, update.Count)
+		
+		// For IN clause
+		tokenPlaceholders = append(tokenPlaceholders, "?")
+		placeholderIdx += 2
+	}
+
+	// Add tokens for IN clause
+	for _, update := range updates {
+		args = append(args, update.Token)
 	}
 
 	query := fmt.Sprintf(`
@@ -209,9 +233,9 @@ func (cs *CountSync) batchUpdateChatsCount(updates []CountUpdate) error {
 			%s
 		END
 		WHERE token IN (%s)
-	`, strings.Join(whenClauses, " "), strings.Join(tokens, ", "))
+	`, strings.Join(whenClauses, " "), strings.Join(tokenPlaceholders, ", "))
 
-	_, err := cs.db.Exec(query)
+	_, err := cs.db.Exec(query, args...)
 	return err
 }
 
@@ -220,15 +244,24 @@ func (cs *CountSync) batchUpdateMessagesCount(updates []messageUpdate) error {
 		return nil
 	}
 
-	// Build batch update query using CASE statement with token and chatNumber
-	var conditions []string
+	// Use parameterized query to prevent SQL injection
+	// Build placeholders for CASE statement and WHERE conditions
 	var whenClauses []string
+	var conditions []string
+	var args []interface{}
 
 	for _, update := range updates {
-		conditions = append(conditions, fmt.Sprintf("(token = '%s' AND number = %d)", update.token, update.chatNumber))
-		whenClauses = append(whenClauses, 
-			fmt.Sprintf("WHEN token = '%s' AND number = %d THEN %d", 
-				update.token, update.chatNumber, update.count))
+		// WHEN token = ? AND number = ? THEN ?
+		whenClauses = append(whenClauses, "WHEN token = ? AND number = ? THEN ?")
+		args = append(args, update.token, update.chatNumber, update.count)
+		
+		// (token = ? AND number = ?)
+		conditions = append(conditions, "(token = ? AND number = ?)")
+	}
+
+	// Add parameters for WHERE clause
+	for _, update := range updates {
+		args = append(args, update.token, update.chatNumber)
 	}
 
 	query := fmt.Sprintf(`
@@ -239,6 +272,6 @@ func (cs *CountSync) batchUpdateMessagesCount(updates []messageUpdate) error {
 		WHERE %s
 	`, strings.Join(whenClauses, " "), strings.Join(conditions, " OR "))
 
-	_, err := cs.db.Exec(query)
+	_, err := cs.db.Exec(query, args...)
 	return err
 }

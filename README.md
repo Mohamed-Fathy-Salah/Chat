@@ -26,7 +26,22 @@ git clone https://github.com/Mohamed-Fathy-Salah/Chat.git
 cd chat
 ```
 
-2. **Start all services:**
+2. **Generate JWT secret key:**
+```bash
+./generate-jwt-key.sh
+```
+Copy the generated key and export it:
+```bash
+export JWT_SECRET_KEY='your_generated_key_here'
+```
+
+Or create a `.env` file:
+```bash
+cp .env.example .env
+# Edit .env and set JWT_SECRET_KEY
+```
+
+3. **Start all services:**
 ```bash
 docker-compose up -d
 ```
@@ -80,6 +95,27 @@ Copy `.env.example` in the requests directory and adjust as needed:
 ```bash
 cp requests/.env.example requests/.env
 ```
+
+### Running Tests
+
+#### Run All Tests (Both Services)
+```bash
+./run-all-tests.sh
+```
+
+#### Run Individual Service Tests
+```bash
+# Request service only
+./test-requests.sh
+
+# Writer service only
+./test-writer.sh
+```
+
+#### Detailed Testing Documentation
+See [`RUN_TESTS.md`](RUN_TESTS.md) for comprehensive testing guide.
+
+Quick reference: [`TESTING_QUICK_REFERENCE.md`](TESTING_QUICK_REFERENCE.md)
 
 ---
 <h2 align="center"> API Docs </h2>

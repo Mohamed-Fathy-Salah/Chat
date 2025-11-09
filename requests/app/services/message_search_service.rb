@@ -1,11 +1,11 @@
 class MessageSearchService
-  def self.search(token, chat_number, query)
+  def self.search(token, chat_number, query, page = 1, limit = 10)
     # Try Elasticsearch first if available
     if elasticsearch_available?
-      search_with_elasticsearch(token, chat_number, query)
+      search_with_elasticsearch(token, chat_number, query, page, limit)
     else
       # Fallback to SQL search
-      search_with_sql(token, chat_number, query)
+      search_with_sql(token, chat_number, query, page, limit)
     end
   end
 
@@ -15,8 +15,10 @@ class MessageSearchService
     false
   end
 
-  def self.search_with_elasticsearch(token, chat_number, query)
+  def self.search_with_elasticsearch(token, chat_number, query, page, limit)
     return [] if query.blank?
+
+    offset = (page - 1) * limit
 
     response = elasticsearch_client.search(
       index: 'messages',
@@ -45,6 +47,8 @@ class MessageSearchService
         sort: [
           { created_at: { order: 'desc' } }
         ],
+        from: offset,
+        size: limit,
         _source: ['number', 'body', 'created_at', 'sender_name']
       }
     )
@@ -61,15 +65,19 @@ class MessageSearchService
     end
   rescue StandardError => e
     Rails.logger.error("Elasticsearch search failed: #{e.message}")
-    search_with_sql(token, chat_number, query)
+    search_with_sql(token, chat_number, query, page, limit)
   end
 
-  def self.search_with_sql(token, chat_number, query)
+  def self.search_with_sql(token, chat_number, query, page, limit)
+    offset = (page - 1) * limit
+
     Message.where(token: token, chat_number: chat_number)
            .where('messages.body LIKE ?', "%#{query}%")
            .joins(:creator)
            .select('messages.number, messages.body, messages.created_at, users.name as sender_name')
            .order(id: :desc)
+           .limit(limit)
+           .offset(offset)
   end
 
   def self.elasticsearch_client
