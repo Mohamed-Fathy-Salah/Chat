@@ -1,6 +1,14 @@
 services:
   db:
     image: mysql:8.0
+    command: >
+      --max-connections=500
+      --innodb-buffer-pool-size=1G
+      --innodb-log-file-size=256M
+      --innodb-flush-log-at-trx-commit=2
+      --innodb-flush-method=O_DIRECT
+      --thread-cache-size=50
+      --table-open-cache=4000
     environment:
       MYSQL_ROOT_PASSWORD: password
       MYSQL_DATABASE: auth_api_development
@@ -14,6 +22,11 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 2G
 
   redis:
     image: redis:7-alpine
@@ -26,6 +39,11 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
 
   rabbitmq:
     image: rabbitmq:3-management-alpine
@@ -42,6 +60,11 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 1G
 
   elasticsearch:
     image: docker.elastic.co/elasticsearch/elasticsearch:8.11.0
@@ -86,6 +109,17 @@ services:
       CORS_ORIGINS: http://localhost:3001,http://localhost:3000
       RAILS_ENV: development
       JWT_SECRET_KEY: ${JWT_SECRET_KEY:-development_secret_key_change_in_production_min_32_chars}
+      RAILS_MAX_THREADS: 32
+      WEB_CONCURRENCY: 4
+      DB_POOL: 64
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 2G
+        reservations:
+          cpus: '1.0'
+          memory: 1G
 
   writer:
     build: ./writer
@@ -107,6 +141,11 @@ services:
       RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672
       ELASTICSEARCH_URL: http://elasticsearch:9200
     restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 512M
 
 volumes:
   mysql_data:

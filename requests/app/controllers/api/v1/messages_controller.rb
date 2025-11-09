@@ -8,13 +8,12 @@ module Api
         validator = validate_params(MessageParamsValidator, :create)
         return unless validator
 
-        # Just verify chat exists
-        unless Chat.where(token: validator.token, number: validator.chat_number).exists?
+        # Get next message number using Redis (returns nil if chat not found)
+        message_number = get_next_message_number(validator.token, validator.chat_number)
+        
+        if message_number.nil?
           return render json: { error: 'Chat not found' }, status: :not_found
         end
-
-        # Get next message number using Redis
-        message_number = get_next_message_number(validator.token, validator.chat_number)
 
         # Publish to RabbitMQ for async processing
         publish_message_creation(validator.token, validator.chat_number, message_number, current_user_id, validator.body)
@@ -46,11 +45,6 @@ module Api
       def index
         validator = validate_params(MessageParamsValidator, :index)
         return unless validator
-
-        # Just verify chat exists
-        unless Chat.where(token: validator.token, number: validator.chat_number).exists?
-          return render json: { error: 'Chat not found' }, status: :not_found
-        end
 
         page = validator.page_value
         limit = validator.limit_value
@@ -108,37 +102,37 @@ module Api
           local change_key = ARGV[1]
           
           if redis.call('EXISTS', key) == 0 then
-            -- Key doesn't exist, we need to initialize it
-            return -1
+            -- Atomically initialize from database value
+            local count_str = ARGV[2]
+            if count_str == 'nil' then
+              return {-1, 'not_found'}
+            end
+            local count = tonumber(count_str)
+            -- Use SET NX to avoid race condition
+            if redis.call('SET', key, count, 'NX') then
+              local new_count = redis.call('INCR', key)
+              redis.call('SADD', 'message_changes', change_key)
+              return {new_count, 'initialized'}
+            else
+              -- Another request initialized it
+              local new_count = redis.call('INCR', key)
+              redis.call('SADD', 'message_changes', change_key)
+              return {new_count, 'concurrent'}
+            end
           else
             -- Key exists, increment it
             local new_count = redis.call('INCR', key)
             redis.call('SADD', 'message_changes', change_key)
-            return new_count
+            return {new_count, 'ok'}
           end
         LUA
         
-        result = REDIS.eval(lua_script, keys: [key], argv: [change_key])
+        # Get current count from database
+        count = Chat.where(token: token, number: chat_number).pick(:messages_count)
+        return nil if count.nil?
         
-        if result == -1
-          # Initialize counter from database (race condition handled by SET NX)
-          count = Chat.where(token: token, number: chat_number).pick(:messages_count) || 0
-          
-          # SET NX: only sets if key doesn't exist (atomic)
-          if REDIS.set(key, count, nx: true)
-            # We successfully initialized, now increment
-            new_count = REDIS.incr(key)
-            REDIS.sadd('message_changes', change_key)
-            new_count
-          else
-            # Another request initialized it, just increment
-            new_count = REDIS.incr(key)
-            REDIS.sadd('message_changes', change_key)
-            new_count
-          end
-        else
-          result
-        end
+        result = REDIS.eval(lua_script, keys: [key], argv: [change_key, count.to_s])
+        result[0]
       end
 
       def publish_message_creation(token, chat_number, message_number, sender_id, body)

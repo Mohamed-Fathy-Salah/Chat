@@ -47,32 +47,32 @@ func (h *MessageHandler) CreateMessage(msg models.CreateMessageMessage) error {
 		log.Printf("Warning: Failed to get message ID: %v", err)
 	}
 
-	// Index in Elasticsearch if available
+	// Index in Elasticsearch asynchronously (non-blocking)
 	if h.esService != nil {
-		// Get sender name for Elasticsearch
-		var senderName string
-		err := h.db.QueryRow("SELECT name FROM users WHERE id = ?", msg.SenderID).Scan(&senderName)
-		if err != nil {
-			log.Printf("Warning: Failed to get sender name: %v", err)
-			senderName = ""
-		}
+		go func() {
+			// Get sender name for Elasticsearch
+			var senderName string
+			err := h.db.QueryRow("SELECT name FROM users WHERE id = ?", msg.SenderID).Scan(&senderName)
+			if err != nil {
+				log.Printf("Warning: Failed to get sender name: %v", err)
+				senderName = ""
+			}
 
-		doc := services.MessageDocument{
-			ID:         int(messageID),
-			Token:      msg.Token,
-			ChatNumber: msg.ChatNumber,
-			Number:     msg.MessageNumber,
-			Body:       msg.Body,
-			SenderID:   msg.SenderID,
-			SenderName: senderName,
-			CreatedAt:  createdAt.Format(time.RFC3339),
-		}
+			doc := services.MessageDocument{
+				ID:         int(messageID),
+				Token:      msg.Token,
+				ChatNumber: msg.ChatNumber,
+				Number:     msg.MessageNumber,
+				Body:       msg.Body,
+				SenderID:   msg.SenderID,
+				SenderName: senderName,
+				CreatedAt:  createdAt.Format(time.RFC3339),
+			}
 
-		if err := h.esService.IndexMessage(doc); err != nil {
-			log.Printf("Warning: Failed to index message in Elasticsearch: %v", err)
-		} else {
-			log.Printf("Indexed message %d in Elasticsearch", msg.MessageNumber)
-		}
+			if err := h.esService.IndexMessage(doc); err != nil {
+				log.Printf("Warning: Failed to index message in Elasticsearch: %v", err)
+			}
+		}()
 	}
 
 	// Add token:chatNumber to Redis set for tracking changes
@@ -104,13 +104,13 @@ func (h *MessageHandler) UpdateMessage(msg models.UpdateMessageMessage) error {
 		return fmt.Errorf("message not found")
 	}
 
-	// Update in Elasticsearch if available
+	// Update in Elasticsearch asynchronously (non-blocking)
 	if h.esService != nil {
-		if err := h.esService.UpdateMessage(msg.Token, msg.ChatNumber, msg.MessageNumber, msg.Body); err != nil {
-			log.Printf("Warning: Failed to update message in Elasticsearch: %v", err)
-		} else {
-			log.Printf("Updated message %d in Elasticsearch", msg.MessageNumber)
-		}
+		go func() {
+			if err := h.esService.UpdateMessage(msg.Token, msg.ChatNumber, msg.MessageNumber, msg.Body); err != nil {
+				log.Printf("Warning: Failed to update message in Elasticsearch: %v", err)
+			}
+		}()
 	}
 
 	return nil

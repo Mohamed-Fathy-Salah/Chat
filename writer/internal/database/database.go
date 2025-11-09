@@ -25,7 +25,13 @@ func Connect(host, user, password, dbName string) (*DB, error) {
 		if err == nil {
 			err = db.Ping()
 			if err == nil {
-				log.Println("Connected to MySQL")
+				// Configure connection pool for high throughput
+				db.SetMaxOpenConns(50)
+				db.SetMaxIdleConns(25)
+				db.SetConnMaxLifetime(5 * time.Minute)
+				db.SetConnMaxIdleTime(2 * time.Minute)
+				
+				log.Println("Connected to MySQL with connection pool configured")
 				return &DB{db}, nil
 			}
 		}

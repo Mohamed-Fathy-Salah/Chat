@@ -12,25 +12,18 @@ class RabbitMqService
   end
 
   def self.publish(queue_name, message)
-    # Declare queue with DLX configuration to match writer service
-    dlx_name = "#{queue_name}.dlx"
-    
-    # Declare queue with dead letter exchange (matches writer Go service)
-    queue = channel.queue(queue_name, 
-      durable: true,
-      arguments: {
-        'x-dead-letter-exchange' => dlx_name
-      }
-    )
+    # Don't declare queue here - let the consumer (writer service) handle it
+    # This avoids queue configuration conflicts
     
     channel.default_exchange.publish(
       message,
-      routing_key: queue.name,
+      routing_key: queue_name,
       persistent: true,
       content_type: 'application/json'
     )
   rescue StandardError => e
     Rails.logger.error "Failed to publish to RabbitMQ: #{e.message}"
+    raise
   end
 
   def self.close

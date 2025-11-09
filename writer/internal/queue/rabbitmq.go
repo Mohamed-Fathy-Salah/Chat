@@ -106,6 +106,16 @@ func (r *RabbitMQ) DeclareQueueWithDLQ(ch *amqp.Channel, queueName string) (amqp
 }
 
 func (r *RabbitMQ) Consume(ch *amqp.Channel, queueName string) (<-chan amqp.Delivery, error) {
+	// Set QoS to prefetch multiple messages for better throughput
+	err := ch.Qos(
+		100,   // Prefetch 100 messages
+		0,     // No size limit
+		false, // Apply per channel
+	)
+	if err != nil {
+		return nil, err
+	}
+	
 	return ch.Consume(
 		queueName, // queue
 		"",        // consumer
