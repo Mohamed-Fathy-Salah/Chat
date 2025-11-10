@@ -56,7 +56,7 @@ paths:
                   example: "password123"
       responses:
         '201':
-          description: User registered successfully
+          description: User registered successfully (JWT stored in HTTP-only cookie)
           content:
             application/json:
               schema:
@@ -65,21 +65,6 @@ paths:
                   message:
                     type: string
                     example: "User created successfully"
-                  user:
-                    type: object
-                    properties:
-                      id:
-                        type: integer
-                        example: 1
-                      email:
-                        type: string
-                        example: "john@example.com"
-                      name:
-                        type: string
-                        example: "John Doe"
-                      created_at:
-                        type: string
-                        format: date-time
         '422':
           description: Validation error
           content:
@@ -127,18 +112,6 @@ paths:
                   message:
                     type: string
                     example: "Logged in successfully"
-                  user:
-                    type: object
-                    properties:
-                      id:
-                        type: integer
-                      email:
-                        type: string
-                      name:
-                        type: string
-                      created_at:
-                        type: string
-                        format: date-time
         '401':
           description: Invalid credentials
           content:
@@ -185,9 +158,6 @@ paths:
                   user:
                     type: object
                     properties:
-                      id:
-                        type: integer
-                        example: 1
                       name:
                         type: string
                         example: "John Doe"
@@ -197,6 +167,36 @@ paths:
                       created_at:
                         type: string
                         format: date-time
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                    example: "Unauthorized"
+  
+  /api/v1/auth/refresh:
+    post:
+      summary: Refresh JWT token
+      tags:
+        - Authentication
+      description: |
+        Generates a new JWT token with the same user_id and updates the HTTP-only cookie.
+        Use this to extend the session before the current token expires.
+      responses:
+        '200':
+          description: Token refreshed successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                    example: "Token refreshed successfully"
         '401':
           description: Unauthorized
           content:

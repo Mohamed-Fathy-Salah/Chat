@@ -84,10 +84,18 @@ services:
 
   requests:
     build: ./requests
-    command: bash -c "rm -f tmp/pids/server.pid && bundle exec rails db:create db:migrate && bundle exec rails server -b 0.0.0.0"
+    command: bash -c "
+      if [ ! -f /jwt/.jwt_secret ]; then
+        openssl rand -hex 64 > /jwt/.jwt_secret;
+      fi &&
+      export JWT_SECRET_KEY=$$(cat /jwt/.jwt_secret) &&
+      rm -f tmp/pids/server.pid &&
+      bundle exec rails db:create db:migrate &&
+      bundle exec rails server -b 0.0.0.0"
     volumes:
       - ./requests:/app
       - bundle_cache:/usr/local/bundle
+      - jwt_data:/jwt
     ports:
       - "3000:3000"
     depends_on:
@@ -108,7 +116,6 @@ services:
       ELASTICSEARCH_URL: http://elasticsearch:9200
       CORS_ORIGINS: http://localhost:3001,http://localhost:3000
       RAILS_ENV: development
-      JWT_SECRET_KEY: ${JWT_SECRET_KEY:-development_secret_key_change_in_production_min_32_chars}
       RAILS_MAX_THREADS: 32
       WEB_CONCURRENCY: 4
       DB_POOL: 64
@@ -153,3 +160,4 @@ volumes:
   rabbitmq_data:
   elasticsearch_data:
   bundle_cache:
+  jwt_data:

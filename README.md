@@ -26,22 +26,7 @@ git clone https://github.com/Mohamed-Fathy-Salah/Chat.git
 cd chat
 ```
 
-2. **Generate JWT secret key:**
-```bash
-./generate-jwt-key.sh
-```
-Copy the generated key and export it:
-```bash
-export JWT_SECRET_KEY='your_generated_key_here'
-```
-
-Or create a `.env` file:
-```bash
-cp .env.example .env
-# Edit .env and set JWT_SECRET_KEY
-```
-
-3. **Start all services:**
+2. **Start all services:**
 ```bash
 docker-compose up -d
 ```
@@ -53,6 +38,8 @@ This will start:
 - Elasticsearch (port 9200)
 - Requests API service (port 3000)
 - Writer worker service
+
+**Note:** JWT secret key is automatically generated and persisted on first run.
 
 3. **Verify services are running:**
 ```bash
@@ -71,6 +58,17 @@ Swagger API Docs: http://localhost:3000/api-docs/index.html
 RabbitMQ Management: http://localhost:15672 (guest/guest)
 Elasticsearch: http://localhost:9200
 ```
+
+### JWT Key Rotation
+
+To rotate the JWT secret key (recommended every 3-6 months):
+
+```bash
+./rotate-jwt-key.sh
+docker-compose restart requests
+```
+
+**Note:** This will invalidate all existing user tokens and require users to log in again.
 
 ### Development Setup
 

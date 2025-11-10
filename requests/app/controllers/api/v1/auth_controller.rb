@@ -20,7 +20,6 @@ module Api
           
           render json: { 
             message: 'User created successfully',
-            user: user_response(user)
           }, status: :created
         else
           render json: { errors: user.errors.full_messages }, status: :unprocessable_entity
@@ -39,7 +38,6 @@ module Api
           
           render json: { 
             message: 'Logged in successfully',
-            user: user_response(user)
           }
         else
           render json: { error: 'Invalid email or password' }, status: :unauthorized
@@ -84,7 +82,6 @@ module Api
 
       def user_response(user)
         {
-          id: user.id,
           email: user.email,
           name: user.name,
           created_at: user.created_at
