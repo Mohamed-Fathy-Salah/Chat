@@ -14,11 +14,10 @@ namespace :elasticsearch do
     indexed = 0
     errors = 0
     
-    Message.includes(:chat, :creator).find_each.with_index do |message, index|
+    Message.includes(:creator).find_each.with_index do |message, index|
       begin
         doc = {
           id: message.id,
-          chat_id: message.chat_id,
           token: message.token,
           chat_number: message.chat_number,
           number: message.number,
@@ -65,14 +64,40 @@ namespace :elasticsearch do
       puts "Index deleted."
     rescue Elasticsearch::Transport::Transport::Errors::NotFound
       puts "Index doesn't exist, skipping delete."
+    rescue Elastic::Transport::Transport::Errors::NotFound
+      puts "Index doesn't exist, skipping delete."
     end
     
-    sleep 1
+    sleep 3
     
-    puts "Creating messages index..."
-    client.indices.create(
-      index: 'messages',
-      body: {
+    puts "Creating messages index with n-gram support..."
+    begin
+      client.indices.create(
+        index: 'messages',
+        body: {
+        settings: {
+          analysis: {
+            analyzer: {
+              ngram_analyzer: {
+                type: 'custom',
+                tokenizer: 'standard',
+                filter: ['lowercase', 'ngram_filter']
+              },
+              search_analyzer: {
+                type: 'custom',
+                tokenizer: 'standard',
+                filter: ['lowercase']
+              }
+            },
+            filter: {
+              ngram_filter: {
+                type: 'edge_ngram',
+                min_gram: 3,
+                max_gram: 20
+              }
+            }
+          }
+        },
         mappings: {
           properties: {
             id: { type: 'integer' },
@@ -80,15 +105,30 @@ namespace :elasticsearch do
             token: { type: 'keyword' },
             chat_number: { type: 'integer' },
             number: { type: 'integer' },
-            body: { type: 'text' },
+            body: { 
+              type: 'text',
+              analyzer: 'ngram_analyzer',
+              search_analyzer: 'search_analyzer',
+              fields: {
+                keyword: { type: 'keyword' },
+                exact: { type: 'text', analyzer: 'standard' }
+              }
+            },
             sender_id: { type: 'integer' },
             sender_name: { type: 'keyword' },
             created_at: { type: 'date' }
           }
         }
       }
-    )
-    puts "Index created."
+      )
+      puts "Index created."
+    rescue Elastic::Transport::Transport::Errors::BadRequest => e
+      if e.message.include?('already exists')
+        puts "Index already exists, skipping creation."
+      else
+        raise
+      end
+    end
     
     puts "\nNow run: rake elasticsearch:reindex_messages"
   end

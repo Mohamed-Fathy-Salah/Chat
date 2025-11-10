@@ -60,15 +60,46 @@ func (es *ElasticsearchService) createIndexIfNotExists() {
 		return
 	}
 
-	// Create index with mapping
+	// Create index with mapping and n-gram support for partial word matching
 	mapping := `{
+		"settings": {
+			"analysis": {
+				"analyzer": {
+					"ngram_analyzer": {
+						"type": "custom",
+						"tokenizer": "standard",
+						"filter": ["lowercase", "ngram_filter"]
+					},
+					"search_analyzer": {
+						"type": "custom",
+						"tokenizer": "standard",
+						"filter": ["lowercase"]
+					}
+				},
+				"filter": {
+					"ngram_filter": {
+						"type": "edge_ngram",
+						"min_gram": 3,
+						"max_gram": 20
+					}
+				}
+			}
+		},
 		"mappings": {
 			"properties": {
 				"id": { "type": "integer" },
 				"token": { "type": "keyword" },
 				"chat_number": { "type": "integer" },
 				"number": { "type": "integer" },
-				"body": { "type": "text" },
+				"body": { 
+					"type": "text",
+					"analyzer": "ngram_analyzer",
+					"search_analyzer": "search_analyzer",
+					"fields": {
+						"keyword": { "type": "keyword" },
+						"exact": { "type": "text", "analyzer": "standard" }
+					}
+				},
 				"sender_id": { "type": "integer" },
 				"sender_name": { "type": "keyword" },
 				"created_at": { "type": "date" }

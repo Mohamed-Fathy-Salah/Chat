@@ -39,7 +39,7 @@ module Api
 
         if message.nil?
           render json: { error: 'Message not found' }, status: :not_found
-        elsif message != current_user.id
+        elsif message != current_user_id
           render json: { error: 'You can only edit your own messages' }, status: :forbidden
         else 
           msg_data = {

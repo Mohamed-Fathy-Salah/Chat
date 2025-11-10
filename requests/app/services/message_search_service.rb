@@ -27,12 +27,48 @@ class MessageSearchService
           bool: {
             must: [
               {
-                match: {
-                  body: {
-                    query: query,
-                    operator: 'and',
-                    fuzziness: 'AUTO'
-                  }
+                bool: {
+                  should: [
+                    # Exact match on standard analyzer (highest priority)
+                    {
+                      match: {
+                        'body.exact': {
+                          query: query,
+                          boost: 4
+                        }
+                      }
+                    },
+                    # Partial word matching with n-grams
+                    {
+                      match: {
+                        body: {
+                          query: query,
+                          boost: 3
+                        }
+                      }
+                    },
+                    # Fuzzy matching for typos
+                    {
+                      match: {
+                        'body.exact': {
+                          query: query,
+                          fuzziness: 'AUTO',
+                          boost: 2
+                        }
+                      }
+                    },
+                    # Wildcard for contains matching
+                    {
+                      wildcard: {
+                        'body.keyword': {
+                          value: "*#{query.downcase}*",
+                          boost: 1,
+                          case_insensitive: true
+                        }
+                      }
+                    }
+                  ],
+                  minimum_should_match: 1
                 }
               },
               {
@@ -45,6 +81,7 @@ class MessageSearchService
           }
         },
         sort: [
+          { _score: { order: 'desc' } },
           { created_at: { order: 'desc' } }
         ],
         from: offset,
