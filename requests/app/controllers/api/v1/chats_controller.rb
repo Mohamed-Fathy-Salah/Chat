@@ -15,8 +15,13 @@ module Api
           return render json: { error: 'Application not found' }, status: :not_found
         end
 
-        # Publish to RabbitMQ for async processing
-        publish_chat_creation(validator.token, chat_number, current_user_id)
+        message = {
+          token: validator.token,
+          chatNumber: chat_number,
+          creatorId: current_user_id
+        }
+        
+        RabbitMqService.publish('create_chats', message.to_json)
         
         render json: { chatNumber: chat_number }, status: :created
       end
@@ -47,57 +52,19 @@ module Api
       private
 
       def get_next_chat_number(token)
-        # Atomically increment and get the next chat number from Redis
         key = "chat_counter:#{token}"
         
-        # Use Lua script for atomic initialization and increment
-        lua_script = <<~LUA
-          local key = KEYS[1]
-          local token = ARGV[1]
+        incremented_number = REDIS.increment_if_exists(key)
+        
+        if incremented_number.nil?
+          count = Application.where(token: token).pick(:chats_count)
+          return nil if count.nil?
           
-          if redis.call('EXISTS', key) == 0 then
-            -- Atomically initialize from database value
-            local count_str = ARGV[2]
-            if count_str == 'nil' then
-              return {-1, 'not_found'}
-            end
-            local count = tonumber(count_str)
-            -- Use SET NX to avoid race condition
-            if redis.call('SET', key, count, 'NX') then
-              local new_count = redis.call('INCR', key)
-              redis.call('SADD', 'chat_changes', token)
-              return {new_count, 'initialized'}
-            else
-              -- Another request initialized it
-              local new_count = redis.call('INCR', key)
-              redis.call('SADD', 'chat_changes', token)
-              return {new_count, 'concurrent'}
-            end
-          else
-            -- Key exists, increment it
-            local new_count = redis.call('INCR', key)
-            redis.call('SADD', 'chat_changes', token)
-            return {new_count, 'ok'}
-          end
-        LUA
+          incremented_number = REDIS.increment_with_default_value(key, count)
+        end
         
-        # Get current count from database
-        count = Application.where(token: token).pick(:chats_count)
-        return nil if count.nil?
-        
-        result = REDIS.eval(lua_script, keys: [key], argv: [token, count.to_s])
-        result[0]
-      end
-
-      def publish_chat_creation(token, chat_number, creator_id)
-        # Publish to RabbitMQ for async processing
-        message = {
-          token: token,
-          chatNumber: chat_number,
-          creatorId: creator_id
-        }
-        
-        RabbitMqService.publish('create_chats', message.to_json)
+        REDIS.sadd('chat_changes', token)
+        incremented_number
       end
     end
   end

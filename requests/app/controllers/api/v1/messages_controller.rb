@@ -15,8 +15,16 @@ module Api
           return render json: { error: 'Chat not found' }, status: :not_found
         end
 
-        # Publish to RabbitMQ for async processing
-        publish_message_creation(validator.token, validator.chat_number, message_number, current_user_id, validator.body)
+        msg_data = {
+          token: validator.token,
+          chatNumber: validator.chat_number.to_i,
+          messageNumber: message_number,
+          senderId: current_user_id,
+          body: validator.body,
+          date: Time.now.utc.iso8601
+        }
+        
+        RabbitMqService.publish('create_messages', msg_data.to_json)
         
         render json: { messageNumber: message_number }, status: :ok
       end
@@ -33,10 +41,14 @@ module Api
           render json: { error: 'Message not found' }, status: :not_found
         elsif message != current_user.id
           render json: { error: 'You can only edit your own messages' }, status: :forbidden
-        else
-          # Publish to Elasticsearch for async indexing
-          publish_message_update(validator.token, validator.chat_number, validator.message_number, validator.body)
-          
+        else 
+          msg_data = {
+            token: validator.token,
+            chatNumber: validator.chat_number.to_i,
+            messageNumber: validator.message_number.to_i,
+            body: validator.body
+          }
+          RabbitMqService.publish('update_messages', msg_data.to_json)
           head :ok
         end
       end
@@ -92,73 +104,20 @@ module Api
       private
 
       def get_next_message_number(token, chat_number)
-        # Atomically increment and get the next message number from Redis
         key = "message_counter:#{token}:#{chat_number}"
         change_key = "#{token}:#{chat_number}"
         
-        # Use Lua script for atomic initialization and increment
-        lua_script = <<~LUA
-          local key = KEYS[1]
-          local change_key = ARGV[1]
+        incremented_number = REDIS.increment_if_exists(key)
+        
+        if incremented_number.nil?
+          count = Chat.where(token: token, number: chat_number).pick(:messages_count)
+          return nil if count.nil?
           
-          if redis.call('EXISTS', key) == 0 then
-            -- Atomically initialize from database value
-            local count_str = ARGV[2]
-            if count_str == 'nil' then
-              return {-1, 'not_found'}
-            end
-            local count = tonumber(count_str)
-            -- Use SET NX to avoid race condition
-            if redis.call('SET', key, count, 'NX') then
-              local new_count = redis.call('INCR', key)
-              redis.call('SADD', 'message_changes', change_key)
-              return {new_count, 'initialized'}
-            else
-              -- Another request initialized it
-              local new_count = redis.call('INCR', key)
-              redis.call('SADD', 'message_changes', change_key)
-              return {new_count, 'concurrent'}
-            end
-          else
-            -- Key exists, increment it
-            local new_count = redis.call('INCR', key)
-            redis.call('SADD', 'message_changes', change_key)
-            return {new_count, 'ok'}
-          end
-        LUA
+          incremented_number = REDIS.increment_with_default_value(key, count)
+        end
         
-        # Get current count from database
-        count = Chat.where(token: token, number: chat_number).pick(:messages_count)
-        return nil if count.nil?
-        
-        result = REDIS.eval(lua_script, keys: [key], argv: [change_key, count.to_s])
-        result[0]
-      end
-
-      def publish_message_creation(token, chat_number, message_number, sender_id, body)
-        # Publish to RabbitMQ for async processing
-        msg_data = {
-          token: token,
-          chatNumber: chat_number.to_i,
-          messageNumber: message_number,
-          senderId: sender_id,
-          body: body,
-          date: Time.now.utc.iso8601
-        }
-        
-        RabbitMqService.publish('create_messages', msg_data.to_json)
-      end
-
-      def publish_message_update(token, chat_number, message_number, body)
-        # Publish to RabbitMQ for async processing
-        msg_data = {
-          token: token,
-          chatNumber: chat_number.to_i,
-          messageNumber: message_number.to_i,
-          body: body
-        }
-        
-        RabbitMqService.publish('update_messages', msg_data.to_json)
+        REDIS.sadd('message_changes', change_key)
+        incremented_number
       end
     end
   end

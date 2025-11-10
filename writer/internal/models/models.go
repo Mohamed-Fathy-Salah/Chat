@@ -26,7 +26,6 @@ type UpdateMessageMessage struct {
 
 type Chat struct {
 	ID            int
-	ApplicationID int
 	Token         string
 	Number        int
 	CreatorID     int
@@ -36,7 +35,6 @@ type Chat struct {
 
 type Message struct {
 	ID         int
-	ChatID     int
 	Token      string
 	ChatNumber int
 	Number     int
