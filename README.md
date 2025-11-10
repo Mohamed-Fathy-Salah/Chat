@@ -110,11 +110,6 @@ cp requests/.env.example requests/.env
 ./test-writer.sh
 ```
 
-#### Detailed Testing Documentation
-See [`RUN_TESTS.md`](RUN_TESTS.md) for comprehensive testing guide.
-
-Quick reference: [`TESTING_QUICK_REFERENCE.md`](TESTING_QUICK_REFERENCE.md)
-
 ---
 <h2 align="center"> API Docs </h2>
 
