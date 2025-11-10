@@ -1,6 +1,28 @@
 #!/bin/bash
 # Run all tests for both Request and Writer services
 
+# Clear any conflicting Ruby environment variables
+unset BUNDLE_IGNORE_CONFIGURE_RUBY_VERSION
+unset RUBYLIB
+unset GEM_HOME
+unset GEM_PATH
+
+# Disable system Ruby gem preloading
+export RUBYOPT="--disable-gems"
+
+# Force use of Ruby 3.2.0 via rbenv
+export RBENV_VERSION=3.2.0
+export PATH="$HOME/.rbenv/shims:$HOME/.rbenv/bin:$PATH"
+if command -v rbenv >/dev/null 2>&1; then
+  eval "$(rbenv init - bash)" 2>/dev/null || true
+fi
+
+# Re-enable gems after rbenv is initialized
+export RUBYOPT=""
+
+# Tell bundler to ignore Ruby version mismatches (since we're managing it with rbenv)
+export BUNDLE_IGNORE_RUBY_VERSION=1
+
 set -e
 
 # Colors for output
@@ -36,28 +58,28 @@ cd requests
 # Check if dependencies are installed
 if [ ! -d "vendor/bundle" ] && [ ! -d "$HOME/.bundle" ]; then
     echo -e "${YELLOW}Installing Ruby dependencies...${NC}"
-    bundle install --quiet
+    $HOME/.rbenv/versions/3.2.0/bin/ruby $HOME/.rbenv/versions/3.2.0/bin/bundle install --quiet
 fi
 
 # Export test environment variables
 export RAILS_ENV=test
-export DATABASE_HOST=${DATABASE_HOST:-localhost}
-export REDIS_URL=${REDIS_URL:-redis://localhost:6379/1}
-export RABBITMQ_URL=${RABBITMQ_URL:-amqp://guest:guest@localhost:5672}
-export ELASTICSEARCH_URL=${ELASTICSEARCH_URL:-http://localhost:9200}
+export DATABASE_HOST=${DATABASE_HOST:-127.0.0.1}
+export REDIS_URL=${REDIS_URL:-redis://127.0.0.1:6379/1}
+export RABBITMQ_URL=${RABBITMQ_URL:-amqp://guest:guest@127.0.0.1:5672}
+export ELASTICSEARCH_URL=${ELASTICSEARCH_URL:-http://127.0.0.1:9200}
 
 # Setup test database
 echo "Setting up test database..."
-bundle exec rails db:drop RAILS_ENV=test 2>/dev/null || true
-bundle exec rails db:create RAILS_ENV=test
-bundle exec rails db:migrate RAILS_ENV=test
+$HOME/.rbenv/versions/3.2.0/bin/ruby $HOME/.rbenv/versions/3.2.0/bin/bundle exec rails db:drop RAILS_ENV=test 2>/dev/null || true
+$HOME/.rbenv/versions/3.2.0/bin/ruby $HOME/.rbenv/versions/3.2.0/bin/bundle exec rails db:create RAILS_ENV=test
+$HOME/.rbenv/versions/3.2.0/bin/ruby $HOME/.rbenv/versions/3.2.0/bin/bundle exec rails db:migrate RAILS_ENV=test
 
 echo ""
 echo "Running RSpec tests..."
 echo ""
 
 # Run tests with better output
-if bundle exec rspec --format documentation --color; then
+if $HOME/.rbenv/versions/3.2.0/bin/ruby $HOME/.rbenv/versions/3.2.0/bin/bundle exec rspec --format documentation --color; then
     REQUESTS_TESTS_PASSED=1
     echo ""
     echo -e "${GREEN}✓ Request Service Tests: PASSED${NC}"
